@@ -5,57 +5,61 @@ single math problem — the One-Shot-RLVR data regime.
 
 ## Experiment
 
-- **Model**: Qwen2.5-Math-1.5B (no `<think>` tags; non-thinking model)
+- **Model**: Qwen2.5-Math-1.5B (non-thinking model, no `<think>` tags)
 - **Training problem π₁**: wind-pressure word problem (see `data/pi1_r128.parquet`)
 - **Training set**: 128 identical copies of π₁ per step (committed to repo)
-- **Algorithm**: SDPO — successful rollouts become token-level demonstrations for
-  failed ones; EMA teacher; IS-corrected GRPO advantage estimator
-- **Reward**: binary (1.0 correct / 0.0 incorrect), boxed-answer extraction with
-  SymPy fallback for symbolic equivalence
+- **Algorithm**: SDPO
+  - Successful rollouts become token-level demonstrations for failed ones
+  - EMA teacher (update rate 0.05) provides soft targets
+  - Distillation loss = JSD(student, teacher) with `alpha=0.5`
+  - IS-corrected GRPO advantage estimator (token-level, threshold=2.0)
+  - KL penalty vs frozen ref model (`kl_loss_coef=0.001`)
+- **Reward**: binary (1.0 correct / 0.0 incorrect), `\boxed{}` extraction + SymPy fallback
 - **Evaluation**: MATH-500 (greedy decoding, same reward logic)
-- **Hardware**: 4 × A100, up to 16 hours
+- **Hardware**: 4 × A100, up to 16 hours per job (auto-resume supported)
 
 ## Repository Structure
 
 ```
-oneshot_sdpo/
+oneshotrlvrSDPO/              ← PROJECT_ROOT on HPC
 ├── data/
-│   ├── pi1_r128.parquet           # 128 copies of π₁ — training set (committed)
-│   └── math500.parquet            # MATH-500 — training validation + standalone eval (committed)
+│   ├── pi1_r128.parquet      # 128 copies of π₁ — training set (committed)
+│   └── math500.parquet       # MATH-500 — validation + standalone eval (committed)
 ├── reward/
-│   └── math_reward.py             # custom reward function (deepscaler-style + SymPy fallback)
+│   └── math_reward.py        # custom reward function (boxed extraction + SymPy grader)
 ├── scripts/
-│   ├── setup_hpc.sh               # one-time login-node env setup
-│   ├── run_local_test.sh          # pre-flight smoke test
-│   └── train_oneshot_sdpo.slurm   # SLURM training job (4×A100, 16 h)
+│   ├── setup_hpc.sh          # one-time login-node env setup
+│   ├── run_local_test.sh     # pre-flight smoke test
+│   └── train_oneshot_sdpo.slurm  # SLURM training job (4×A100, 16h, auto-resume)
 ├── eval/
-│   ├── eval_math500.py            # standalone MATH-500 evaluation
-│   └── eval_math500.slurm         # SLURM eval job (1×A100, 2 h)
+│   ├── eval_math500.py       # standalone MATH-500 evaluation
+│   └── eval_math500.slurm   # SLURM eval job (1×A100, 2h)
 ├── requirements.txt
-├── .gitignore
 └── README.md
 ```
 
 Both parquet files are committed directly to the repo (sourced from One-Shot-RLVR,
-pinned commits). No data download step is needed.
+pinned commits). No data download step needed.
+
+The core SDPO/verl logic lives in the **installed package**
+(`pip install git+https://github.com/lasgroup/SDPO.git`).
+Our repo contributes only: reward function, data, and experiment config.
 
 ## HPC Setup (run once on login node)
 
 ```bash
-scp -r oneshot_sdpo/ <user>@<hpc>:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/
-ssh <hpc>
-bash /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/oneshot_sdpo/scripts/setup_hpc.sh
+conda activate sdpo
+bash /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/scripts/setup_hpc.sh
 ```
 
 `setup_hpc.sh` installs SDPO (verl + all core deps) and sympy via pip, creates the
-output directory tree, and verifies key imports. Run it **on the login node** where
-internet access is available.
+output directory tree, and verifies key imports.
 
 ## Training
 
 ```bash
 conda activate sdpo
-cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/oneshot_sdpo
+cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 
 # 1. Pre-flight smoke test
 bash scripts/run_local_test.sh
@@ -64,61 +68,68 @@ bash scripts/run_local_test.sh
 sbatch scripts/train_oneshot_sdpo.slurm
 ```
 
+### Auto-resume after timeout
+
+`trainer.resume_mode=auto` is set — resubmit the same command after a timeout:
+
+```bash
+sbatch scripts/train_oneshot_sdpo.slurm   # Job 1: runs until 16h timeout
+sbatch scripts/train_oneshot_sdpo.slurm   # Job 2: resumes from last checkpoint
+```
+
+Max work lost per timeout = 50 steps (`save_freq=50`).
+
 ## Evaluation
 
 ```bash
-# After training completes, evaluate the final checkpoint:
-sbatch --export=CKPT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/checkpoints/global_step_500 \
-    eval/eval_math500.slurm
+# Evaluate final checkpoint (step 500)
+sbatch eval/eval_math500.slurm
 
-# Or run interactively:
-conda activate sdpo
-python eval/eval_math500.py \
-    --checkpoint /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/checkpoints/global_step_500 \
-    --eval_data  data/math500.parquet \
-    --step       500
+# Evaluate a specific step
+sbatch --export=CKPT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/checkpoints/global_step_300 \
+    eval/eval_math500.slurm
+```
+
+Results written to `output/eval_results/eval_step_{N}.jsonl`.
+Final line of each file is a summary:
+```json
+{"summary": true, "step": 500, "accuracy": 0.42, "correct": 210, "total": 500}
 ```
 
 ## Output Layout
 
 ```
-/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/
-├── checkpoints/                    # trainer.default_local_dir
-│   └── global_step_{N}/actor/      # SDPO checkpoint structure
-├── tensorboard/                    # TENSORBOARD_DIR env var
+output/
+├── checkpoints/
+│   └── global_step_{50,100,...,500}/
+│       ├── actor/              ← HuggingFace model weights (loadable by vLLM)
+│       └── actor_optimizer/    ← optimizer states (only needed to resume training)
+├── tensorboard/
 │   └── oneshot_sdpo/oneshot_sdpo_qwen25math_1.5b_pi1/
-├── logs/                           # SLURM stdout/stderr
+├── logs/
 │   ├── train_{JOBID}.out/err
 │   └── eval_math500_{JOBID}.out/err
-├── rollouts/                       # trainer.validation_data_dir
-│   └── {N}.jsonl                   # one file per val step (SDPO native naming)
-└── eval_results/                   # eval_math500.py output
+├── rollouts/                   ← MATH-500 validation rollouts (every 50 steps)
+│   └── {0,50,100,...,500}.jsonl
+├── train_rollouts/             ← training rollouts (every step)
+│   └── {1,2,...,500}.jsonl
+└── eval_results/               ← standalone eval output
     └── eval_step_{N}.jsonl
 ```
 
-### Rollout JSONL fields (SDPO native)
+### JSONL schema (rollouts + eval)
 
-| Field | Source |
-|-------|--------|
-| `input` | prompt text |
-| `output` | model response |
-| `gts` | ground truth |
-| `score` | reward scalar |
-| `step` | training step |
-| `extracted_answer` | from `compute_score` dict return |
-| `is_correct` | from `compute_score` dict return |
-
-### Eval JSONL fields (`eval_math500.py`)
-
-| Field | Source |
-|-------|--------|
-| `step` | training step |
-| `prompt` | input text |
-| `response` | model output |
-| `extracted_answer` | `extract_answer(response)` |
-| `ground_truth` | from math500.parquet |
-| `reward` | 1.0 / 0.0 |
-| `is_correct` | bool |
+```json
+{
+  "input": "prompt text",
+  "output": "model response",
+  "gts": "ground truth",
+  "score": 1.0,
+  "step": 100,
+  "extracted_answer": "42",
+  "is_correct": true
+}
+```
 
 ## Monitoring
 
@@ -126,19 +137,54 @@ python eval/eval_math500.py \
 # TensorBoard
 tensorboard --logdir /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/tensorboard
 
-# Follow SLURM log
+# Follow live log
 tail -f /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_<JOBID>.out
+```
+
+### TensorBoard metrics
+
+| Category | Key examples |
+|----------|-------------|
+| Reward | `critic/score/mean`, `critic/rewards/mean` |
+| Advantage | `critic/advantages/mean/max/min` |
+| Response length | `response_length/mean`, `response_length/clip_ratio` |
+| Actor | `actor/pg_clipfrac`, `actor/grad_norm`, `actor/entropy` |
+| SDPO distillation | `self_distillation/success_group_fraction`, `self_distillation/reprompt_sample_fraction` |
+| IS correction | `rollout_corr/kl`, `rollout_corr/rollout_is_mean`, `rollout_corr/rollout_is_eff_sample_size` |
+| Validation | `val-core/simplerl/math500/reward/mean@1` |
+| Throughput | `perf/throughput`, `timing_s/gen` |
+
+## SDPO Algorithm
+
+```
+Each training step:
+  1. Rollout:   sample n=8 responses per prompt (temp=0.6)
+  2. Reward:    grade with compute_score() → binary 1.0/0.0
+  3. Distill:   for each prompt group:
+                  success = responses with score=1.0
+                  failed  = responses with score=0.0
+                  build reprompt: failed response + EMA teacher demonstration
+  4. Advantage: GRPO (group-relative, no std norm)
+                IS correction: w_t = π_actor(t)/π_rollout(t), clipped at 2.0
+  5. Loss:      SDPO_loss = JSD(student, teacher)   [alpha=0.5]
+                           + kl_loss_coef * KL(actor||ref)
+                           * IS_weight
+  6. Update:    gradient step on actor
+                EMA teacher: θ_t ← 0.95·θ_t + 0.05·θ_actor
+
+Eval (every 50 steps):
+  greedy rollout on MATH-500 (n=1, temp=0)
+  → val-core/simplerl/math500/reward/mean@1
 ```
 
 ## Key Design Decisions
 
 | Decision | Choice | Reason |
 |----------|--------|--------|
-| Hydra config base | `ppo_trainer` | `sdpo.yaml` inherits `user.yaml` which requires `${oc.env:TASK}` and `${oc.env:EXPERIMENT}` env vars — CSCS-specific, crashes on other HPC |
-| Data files | Committed parquets | Sourced directly from One-Shot-RLVR; no download step needed on HPC |
+| Hydra config | `ppo_trainer` | `sdpo.yaml` requires `TASK`/`EXPERIMENT` env vars (CSCS-specific) |
+| Data files | Committed parquets | No download step on HPC |
 | `use_think` | `False` | Qwen2.5-Math-1.5B has no `<think>` tags |
-| Reward grading | deepscaler-style (mathd + sympy) | SymPy catches `64/5 == 12.8` |
-| `data_source` | from repo-shipped parquet (`deepscaler`) | Bypassed by `custom_reward_function.path`; value is ignored at runtime |
-| Rollout JSONL names | SDPO native (`input`/`output`/`gts`/`score`) | Avoids vendoring `ray_trainer.py` |
-| Local `verl/` subtree | None | SDPO is pip-installable |
+| `alpha=0.5` | JSD between student and teacher | Balances forward and reverse KL |
+| Grading | boxed extraction + mathd + SymPy | SymPy catches `64/5 == 12.8` |
+| Resume | `trainer.resume_mode=auto` | Same sbatch command works for fresh start and resume |
 | WandB | `WANDB_MODE=disabled` | TensorBoard only |
