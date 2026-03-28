@@ -21,49 +21,53 @@ echo "================================================================"
 
 cd "${ONESHOT_DIR}"
 
-# ── Step 1: Generate training parquets ───────────────────────────────────────
+# ── Step 1: Validate committed parquet files ──────────────────────────────────
 echo ""
-echo ">>> Step 1: prepare_train_data.py"
-python data/prepare_train_data.py --output_dir data/datasets/train
+echo ">>> Step 1: parquet file validation"
 
-# Verify row counts
+# Check files exist and start with PAR1 magic bytes
+for f in data/pi1_r128.parquet data/math500.parquet; do
+    if [ ! -f "${f}" ]; then
+        echo "ERROR: ${f} not found" >&2
+        exit 1
+    fi
+    magic=$(head -c 4 "${f}" | cat -v)
+    if [[ "${magic}" != "PAR1" ]]; then
+        echo "ERROR: ${f} does not look like a parquet file (bad magic bytes)" >&2
+        exit 1
+    fi
+    echo "  ${f} : exists, PAR1 magic bytes OK"
+done
+
 python - <<'EOF'
 import pandas as pd
-train = pd.read_parquet("data/datasets/train/train.parquet")
-val   = pd.read_parquet("data/datasets/train/val.parquet")
-assert len(train) == 128, f"Expected 128 train rows, got {len(train)}"
-assert len(val)   == 16,  f"Expected 16 val rows, got {len(val)}"
+
+train = pd.read_parquet("data/pi1_r128.parquet")
+assert len(train) == 128, f"Expected 128 rows in pi1_r128.parquet, got {len(train)}"
 expected_cols = {"data_source", "prompt", "ability", "reward_model", "extra_info"}
 assert expected_cols.issubset(set(train.columns)), (
-    f"Missing columns: {expected_cols - set(train.columns)}"
+    f"Missing columns in pi1_r128.parquet: {expected_cols - set(train.columns)}"
 )
-print(f"  train.parquet : {len(train)} rows  columns={train.columns.tolist()}  OK")
-print(f"  val.parquet   : {len(val)} rows    columns={val.columns.tolist()}  OK")
+print(f"  pi1_r128.parquet  : {len(train)} rows  columns={train.columns.tolist()}  OK")
+
+math500 = pd.read_parquet("data/math500.parquet")
+assert len(math500) == 500, f"Expected 500 rows in math500.parquet, got {len(math500)}"
+assert expected_cols.issubset(set(math500.columns)), (
+    f"Missing columns in math500.parquet: {expected_cols - set(math500.columns)}"
+)
+print(f"  math500.parquet   : {len(math500)} rows  columns={math500.columns.tolist()}  OK")
 EOF
 echo ">>> Step 1 passed."
 
-# ── Step 2: Generate MATH-500 eval parquet ────────────────────────────────────
+# ── Step 2: Reward self-test ──────────────────────────────────────────────────
 echo ""
-echo ">>> Step 2: prepare_math500_data.py"
-python data/prepare_math500_data.py --output_dir data/datasets/math500
-
-python - <<'EOF'
-import pandas as pd
-df = pd.read_parquet("data/datasets/math500/eval.parquet")
-assert len(df) == 500, f"Expected 500 eval rows, got {len(df)}"
-print(f"  eval.parquet  : {len(df)} rows  columns={df.columns.tolist()}  OK")
-EOF
+echo ">>> Step 2: reward/math_reward.py self-test"
+python reward/math_reward.py
 echo ">>> Step 2 passed."
 
-# ── Step 3: Reward self-test ──────────────────────────────────────────────────
+# ── Step 3: Key imports ───────────────────────────────────────────────────────
 echo ""
-echo ">>> Step 3: reward/math_reward.py self-test"
-python reward/math_reward.py
-echo ">>> Step 3 passed."
-
-# ── Step 4: Key imports ───────────────────────────────────────────────────────
-echo ""
-echo ">>> Step 4: import verification"
+echo ">>> Step 3: import verification"
 python - <<'EOF'
 import verl
 import vllm
@@ -78,7 +82,7 @@ print("  torch         :", torch.__version__)
 print("  tensorboard   : ok")
 print("  sympy         :", sympy.__version__)
 EOF
-echo ">>> Step 4 passed."
+echo ">>> Step 3 passed."
 
 echo ""
 echo "================================================================"

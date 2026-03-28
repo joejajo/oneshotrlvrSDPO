@@ -1,0 +1,19 @@
+# One-Shot-RLVR + SDPO dependencies
+#
+# Install on HPC login node (where internet access is available):
+#   pip install -r requirements.txt
+#
+# Or run the full setup script which handles ordering:
+#   bash scripts/setup_hpc.sh
+#
+# Prerequisites (must be pre-installed in the conda env before pip install):
+#   torch, vllm, flash-attn, ray[default], transformers
+
+# SDPO: verl fork with Self-Distilled Policy Optimization.
+# Installs verl + hydra-core, tensorboard, accelerate, peft,
+# datasets, pandas, pyarrow, pylatexenc, and other core deps.
+git+https://github.com/lasgroup/SDPO.git
+
+# SymPy: required by grade_answer_sympy in reward/math_reward.py.
+# Not in SDPO's install_requires.
+sympy

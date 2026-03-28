@@ -14,7 +14,7 @@ PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}/oneshot_sdpo
 OUTPUT_ROOT=${PROJECT_ROOT}/output
 
-EVAL_DATA=${ONESHOT_DIR}/data/datasets/math500/eval.parquet
+EVAL_DATA=${ONESHOT_DIR}/data/math500.parquet
 OUTPUT_DIR=${OUTPUT_ROOT}/eval_results
 
 # Checkpoint to evaluate.

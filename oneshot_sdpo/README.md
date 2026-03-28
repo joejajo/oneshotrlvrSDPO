@@ -6,8 +6,8 @@ single math problem — the One-Shot-RLVR data regime.
 ## Experiment
 
 - **Model**: Qwen2.5-Math-1.5B (no `<think>` tags; non-thinking model)
-- **Training problem π₁**: wind-pressure word problem (see `data/pi1_example.json`)
-- **Training set**: 128 identical copies of π₁ per step
+- **Training problem π₁**: wind-pressure word problem (see `data/pi1_r128.parquet`)
+- **Training set**: 128 identical copies of π₁ per step (committed to repo)
 - **Algorithm**: SDPO — successful rollouts become token-level demonstrations for
   failed ones; EMA teacher; IS-corrected GRPO advantage estimator
 - **Reward**: binary (1.0 correct / 0.0 incorrect), boxed-answer extraction with
@@ -20,11 +20,10 @@ single math problem — the One-Shot-RLVR data regime.
 ```
 oneshot_sdpo/
 ├── data/
-│   ├── pi1_example.json           # π₁ problem text + answer "12.8"
-│   ├── prepare_train_data.py      # builds train.parquet + val.parquet
-│   └── prepare_math500_data.py    # downloads MATH-500, writes eval.parquet
+│   ├── pi1_r128.parquet           # 128 copies of π₁ — training set (committed)
+│   └── math500.parquet            # MATH-500 — training validation + standalone eval (committed)
 ├── reward/
-│   └── math_reward.py             # SDPO custom reward function
+│   └── math_reward.py             # custom reward function (deepscaler-style + SymPy fallback)
 ├── scripts/
 │   ├── setup_hpc.sh               # one-time login-node env setup
 │   ├── run_local_test.sh          # pre-flight smoke test
@@ -32,11 +31,13 @@ oneshot_sdpo/
 ├── eval/
 │   ├── eval_math500.py            # standalone MATH-500 evaluation
 │   └── eval_math500.slurm         # SLURM eval job (1×A100, 2 h)
+├── requirements.txt
 ├── .gitignore
 └── README.md
 ```
 
-`data/datasets/` and `output/` are generated at runtime on HPC and are gitignored.
+Both parquet files are committed directly to the repo (sourced from One-Shot-RLVR,
+pinned commits). No data download step is needed.
 
 ## HPC Setup (run once on login node)
 
@@ -46,9 +47,9 @@ ssh <hpc>
 bash /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/oneshot_sdpo/scripts/setup_hpc.sh
 ```
 
-`setup_hpc.sh` installs SDPO (verl + all core deps) via pip, installs sympy, and
-creates the output directory tree.  Run it **on the login node** where internet
-access is available.
+`setup_hpc.sh` installs SDPO (verl + all core deps) and sympy via pip, creates the
+output directory tree, and verifies key imports. Run it **on the login node** where
+internet access is available.
 
 ## Training
 
@@ -56,16 +57,10 @@ access is available.
 conda activate sdpo
 cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/oneshot_sdpo
 
-# 1. Generate training parquets
-python data/prepare_train_data.py --output_dir data/datasets/train
-
-# 2. Download MATH-500 eval parquet
-python data/prepare_math500_data.py --output_dir data/datasets/math500
-
-# 3. Pre-flight smoke test
+# 1. Pre-flight smoke test
 bash scripts/run_local_test.sh
 
-# 4. Submit training job
+# 2. Submit training job
 sbatch scripts/train_oneshot_sdpo.slurm
 ```
 
@@ -80,7 +75,7 @@ sbatch --export=CKPT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/checkpoint
 conda activate sdpo
 python eval/eval_math500.py \
     --checkpoint /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/checkpoints/global_step_500 \
-    --eval_data  data/datasets/math500/eval.parquet \
+    --eval_data  data/math500.parquet \
     --step       500
 ```
 
@@ -121,7 +116,7 @@ python eval/eval_math500.py \
 | `prompt` | input text |
 | `response` | model output |
 | `extracted_answer` | `extract_answer(response)` |
-| `ground_truth` | from eval.parquet |
+| `ground_truth` | from math500.parquet |
 | `reward` | 1.0 / 0.0 |
 | `is_correct` | bool |
 
@@ -139,10 +134,11 @@ tail -f /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_<JOBID>.out
 
 | Decision | Choice | Reason |
 |----------|--------|--------|
-| Hydra config base | `ppo_trainer` | `sdpo.yaml` inherits `user.yaml` with CSCS-specific paths |
+| Hydra config base | `ppo_trainer` | `sdpo.yaml` inherits `user.yaml` which requires `${oc.env:TASK}` and `${oc.env:EXPERIMENT}` env vars — CSCS-specific, crashes on other HPC |
+| Data files | Committed parquets | Sourced directly from One-Shot-RLVR; no download step needed on HPC |
 | `use_think` | `False` | Qwen2.5-Math-1.5B has no `<think>` tags |
 | Reward grading | deepscaler-style (mathd + sympy) | SymPy catches `64/5 == 12.8` |
-| `data_source` | `lighteval/MATH` | Present in SDPO's router; `custom_reward_function.path` bypasses it regardless |
+| `data_source` | from repo-shipped parquet (`deepscaler`) | Bypassed by `custom_reward_function.path`; value is ignored at runtime |
 | Rollout JSONL names | SDPO native (`input`/`output`/`gts`/`score`) | Avoids vendoring `ray_trainer.py` |
 | Local `verl/` subtree | None | SDPO is pip-installable |
 | WandB | `WANDB_MODE=disabled` | TensorBoard only |

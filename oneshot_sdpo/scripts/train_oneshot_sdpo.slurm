@@ -15,8 +15,13 @@ ONESHOT_DIR=${PROJECT_ROOT}/oneshot_sdpo
 OUTPUT_ROOT=${PROJECT_ROOT}/output
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
-TRAIN_PARQUET=${ONESHOT_DIR}/data/datasets/train/train.parquet
-VAL_PARQUET=${ONESHOT_DIR}/data/datasets/train/val.parquet
+
+# Parquet files committed directly to the repo (from One-Shot-RLVR)
+# pi1_r128.parquet  : 128 copies of π₁ — the one-shot training set
+# math500.parquet   : MATH-500 — used for both online validation and standalone eval
+TRAIN_PARQUET=${ONESHOT_DIR}/data/pi1_r128.parquet
+EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
+
 REWARD_PATH=${ONESHOT_DIR}/reward/math_reward.py
 CKPT_DIR=${OUTPUT_ROOT}/checkpoints
 ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts
@@ -25,57 +30,60 @@ ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate sdpo
 
-# Disable WandB entirely — we use TensorBoard only
 export WANDB_MODE=disabled
+export WANDB_DISABLED=true
 
-# TensorBoard log directory.
-# SDPO's _TensorboardAdapter reads this env var at initialisation.
+# TensorBoard: SDPO's _TensorboardAdapter reads TENSORBOARD_DIR at init.
 # Logs land at: $TENSORBOARD_DIR/<project_name>/<experiment_name>/
 export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 
-# Make reward module importable (fallback; verl loads it via path directly)
+# Make reward module importable (verl also loads it via path directly)
 export PYTHONPATH=${ONESHOT_DIR}:${PYTHONPATH}
 
-# Avoid vLLM attention backend issues (used by One-Shot-RLVR's training script)
+# vLLM settings (from One-Shot-RLVR training script + SDPO verl_training.sh)
 export VLLM_ATTENTION_BACKEND=XFORMERS
-
-# Use vLLM v1 engine (used by SDPO's training/verl_training.sh)
 export VLLM_USE_V1=1
+export PYTHONUNBUFFERED=1
 
-mkdir -p "${OUTPUT_ROOT}/logs"
-mkdir -p "${CKPT_DIR}"
-mkdir -p "${ROLLOUT_DIR}"
-mkdir -p "${OUTPUT_ROOT}/tensorboard"
+mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard"
 
 echo "================================================================"
 echo "  One-Shot-RLVR + SDPO training"
-echo "  Job ID    : ${SLURM_JOB_ID}"
-echo "  Model     : ${MODEL_PATH}"
-echo "  Train data: ${TRAIN_PARQUET}"
-echo "  Checkpoints: ${CKPT_DIR}"
-echo "  TensorBoard: ${TENSORBOARD_DIR}"
-echo "  Rollouts  : ${ROLLOUT_DIR}"
+echo "  Job ID      : ${SLURM_JOB_ID}"
+echo "  Model       : ${MODEL_PATH}"
+echo "  Train data  : ${TRAIN_PARQUET}"
+echo "  Eval data   : ${EVAL_PARQUET}"
+echo "  Checkpoints : ${CKPT_DIR}"
+echo "  TensorBoard : ${TENSORBOARD_DIR}"
+echo "  Rollouts    : ${ROLLOUT_DIR}"
 echo "================================================================"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
-# Config base: ppo_trainer (cluster-neutral; sdpo.yaml is avoided because
-# it pulls in user.yaml which has CSCS-cluster-specific defaults).
-# All SDPO algorithm keys are set explicitly below.
+# Config base: ppo_trainer
+#   Using --config-name ppo_trainer (NOT sdpo).
+#   sdpo.yaml inherits user.yaml which requires TASK and EXPERIMENT env vars
+#   specific to the CSCS cluster. ppo_trainer.yaml is cluster-neutral.
+#   All SDPO-specific keys are set explicitly below.
 #
-# SDPO-critical keys (would otherwise default to ppo_trainer.yaml values):
+# SDPO keys (absent from ppo_trainer.yaml, must be set explicitly):
 #   actor_rollout_ref.actor.policy_loss.loss_mode=sdpo
 #   algorithm.adv_estimator=grpo
 #   algorithm.norm_adv_by_std_in_grpo=False
 #   algorithm.rollout_correction.rollout_is=token
 #   algorithm.rollout_correction.rollout_is_threshold=2.0
 #   actor_rollout_ref.rollout.calculate_log_probs=True
+#   actor_rollout_ref.actor.self_distillation.*
+#
+# val_kwargs: pre-declared in rollout.yaml with correct defaults
+#   (temperature=0, n=1, do_sample=False) — no override needed.
 
 python -m verl.trainer.main_ppo \
-    --config-name sdpo \
+    --config-name ppo_trainer \
     \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.model.trust_remote_code=True \
     \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
@@ -83,11 +91,8 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=10240 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=10240 \
-    +actor_rollout_ref.rollout.val_kwargs.do_sample=False \
-    +actor_rollout_ref.rollout.val_kwargs.temperature=0 \
-    +actor_rollout_ref.rollout.val_kwargs.n=1 \
+    actor_rollout_ref.rollout.max_model_len=4096 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
@@ -96,7 +101,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.ppo_mini_batch_size=128 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=24000 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=20000 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     \
@@ -109,7 +114,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=6144 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=3072 \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
     \
@@ -122,11 +127,13 @@ python -m verl.trainer.main_ppo \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
     \
     data.train_files="[${TRAIN_PARQUET}]" \
-    data.val_files="[${VAL_PARQUET}]" \
+    data.val_files="[${EVAL_PARQUET}]" \
     data.train_batch_size=128 \
     data.val_batch_size=530 \
     data.max_prompt_length=1024 \
     data.max_response_length=3072 \
+    data.filter_overlong_prompts=True \
+    data.trust_remote_code=True \
     \
     custom_reward_function.path="${REWARD_PATH}" \
     custom_reward_function.name=compute_score \
