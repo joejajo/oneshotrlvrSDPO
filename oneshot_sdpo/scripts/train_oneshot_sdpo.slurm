@@ -11,7 +11,7 @@
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
-ONESHOT_DIR=${PROJECT_ROOT}/oneshot_sdpo
+ONESHOT_DIR=${PROJECT_ROOT}
 OUTPUT_ROOT=${PROJECT_ROOT}/output
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -41,8 +41,9 @@ export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 # Make reward module importable (verl also loads it via path directly)
 export PYTHONPATH=${ONESHOT_DIR}:${PYTHONPATH}
 
-# vLLM settings (from One-Shot-RLVR training script + SDPO verl_training.sh)
-export VLLM_ATTENTION_BACKEND=XFORMERS
+# vLLM settings (from SDPO verl_training.sh)
+# V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
+unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
 
@@ -151,6 +152,7 @@ python -m verl.trainer.main_ppo \
     trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1 \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
+    trainer.resume_mode=auto \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.default_hdfs_dir=null \
