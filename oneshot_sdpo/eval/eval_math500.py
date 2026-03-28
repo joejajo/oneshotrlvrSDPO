@@ -7,7 +7,7 @@ grades each answer with the same reward logic as training, and writes an audit J
 Usage:
     python eval_math500.py \\
         --checkpoint output/checkpoints/global_step_500 \\
-        --eval_data   data/datasets/math500/eval.parquet \\
+        --eval_data   data/math500.parquet \\
         --step        500 \\
         --output_dir  output/eval_results
 
@@ -99,8 +99,8 @@ def main():
         help="Directory where eval_step_N.jsonl is written",
     )
     parser.add_argument(
-        "--max_tokens", type=int, default=3072,
-        help="Maximum tokens to generate per sample (default: 3072)",
+        "--max_tokens", type=int, default=4096,
+        help="Maximum tokens to generate per sample (default: 4096)",
     )
     parser.add_argument(
         "--gpu_memory_utilization", type=float, default=0.9,
