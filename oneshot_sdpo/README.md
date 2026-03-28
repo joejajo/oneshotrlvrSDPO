@@ -11,9 +11,9 @@ single math problem — the One-Shot-RLVR data regime.
 - **Algorithm**: SDPO
   - Successful rollouts become token-level demonstrations for failed ones
   - EMA teacher (update rate 0.05) provides soft targets
-  - Distillation loss = JSD(student, teacher) with `alpha=0.5`
-  - IS-corrected GRPO advantage estimator (token-level, threshold=2.0)
+  - Loss = JSD(student, teacher) weighted by token-level IS correction
   - KL penalty vs frozen ref model (`kl_loss_coef=0.001`)
+  - GRPO advantages computed but unused — success/failure determined by reward score
 - **Reward**: binary (1.0 correct / 0.0 incorrect), `\boxed{}` extraction + SymPy fallback
 - **Evaluation**: MATH-500 (greedy decoding, same reward logic)
 - **Hardware**: 4 × A100, up to 16 hours per job (auto-resume supported)
@@ -164,13 +164,17 @@ Each training step:
                   success = responses with score=1.0
                   failed  = responses with score=0.0
                   build reprompt: failed response + EMA teacher demonstration
-  4. Advantage: GRPO (group-relative, no std norm)
-                IS correction: w_t = π_actor(t)/π_rollout(t), clipped at 2.0
-  5. Loss:      SDPO_loss = JSD(student, teacher)   [alpha=0.5]
+  4. Loss:      SDPO_loss = JSD(student, teacher)   [alpha=0.5]
                            + kl_loss_coef * KL(actor||ref)
-                           * IS_weight
-  6. Update:    gradient step on actor
+                           * IS_weight (token-level, clipped at 2.0)
+  5. Update:    gradient step on actor
                 EMA teacher: θ_t ← 0.95·θ_t + 0.05·θ_actor
+
+Notes:
+  - GRPO advantages are computed (adv_estimator=grpo) but NOT used in the loss.
+    Success/failure is determined by reward score (threshold=1.0), not advantage.
+  - The entire training signal comes from the EMA teacher via JSD distillation.
+  - IS correction weights the distillation loss token-by-token.
 
 Eval (every 50 steps):
   greedy rollout on MATH-500 (n=1, temp=0)
