@@ -25,6 +25,7 @@ EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
 REWARD_PATH=${ONESHOT_DIR}/reward/math_reward.py
 CKPT_DIR=${OUTPUT_ROOT}/checkpoints
 ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts
+TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts
 
 # ── Environment ───────────────────────────────────────────────────────────────
 source "$(conda info --base)/etc/profile.d/conda.sh"
@@ -45,7 +46,7 @@ export VLLM_ATTENTION_BACKEND=XFORMERS
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
 
-mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard"
+mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard"
 
 echo "================================================================"
 echo "  One-Shot-RLVR + SDPO training"
@@ -55,7 +56,8 @@ echo "  Train data  : ${TRAIN_PARQUET}"
 echo "  Eval data   : ${EVAL_PARQUET}"
 echo "  Checkpoints : ${CKPT_DIR}"
 echo "  TensorBoard : ${TENSORBOARD_DIR}"
-echo "  Rollouts    : ${ROLLOUT_DIR}"
+echo "  Val rollouts: ${ROLLOUT_DIR}"
+echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "================================================================"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -91,8 +93,8 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=4096 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
+    actor_rollout_ref.rollout.max_model_len=5120 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=8192 \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
@@ -114,7 +116,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=3072 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
     \
@@ -131,7 +133,7 @@ python -m verl.trainer.main_ppo \
     data.train_batch_size=128 \
     data.val_batch_size=530 \
     data.max_prompt_length=1024 \
-    data.max_response_length=3072 \
+    data.max_response_length=4096 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
     \
@@ -150,5 +152,6 @@ python -m verl.trainer.main_ppo \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
+    trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.default_hdfs_dir=null \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
