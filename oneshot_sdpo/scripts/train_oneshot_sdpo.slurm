@@ -71,7 +71,7 @@ echo "================================================================"
 #   actor_rollout_ref.rollout.calculate_log_probs=True
 
 python -m verl.trainer.main_ppo \
-    --config-name ppo_trainer \
+    --config-name sdpo \
     \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -124,6 +124,7 @@ python -m verl.trainer.main_ppo \
     data.train_files="[${TRAIN_PARQUET}]" \
     data.val_files="[${VAL_PARQUET}]" \
     data.train_batch_size=128 \
+    data.val_batch_size=530 \
     data.max_prompt_length=1024 \
     data.max_response_length=3072 \
     \
