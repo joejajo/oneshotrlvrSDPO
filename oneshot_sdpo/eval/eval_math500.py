@@ -30,6 +30,7 @@ import json
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 
 # Reward utilities re-used from math_reward.py
@@ -68,8 +69,8 @@ def build_prompts(df: pd.DataFrame) -> list[str]:
     """Extract the user content string from each prompt cell."""
     prompts = []
     for cell in df["prompt"]:
-        # cell is list[dict] with {"role": "user", "content": "..."}
-        if isinstance(cell, list):
+        # cell is a list or numpy array of dicts: [{"role": "user", "content": "..."}]
+        if isinstance(cell, (list, np.ndarray)):
             text = cell[0]["content"]
         else:
             text = str(cell)
