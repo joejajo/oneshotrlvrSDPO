@@ -41,8 +41,9 @@ export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 # Make reward module importable (verl also loads it via path directly)
 export PYTHONPATH=${ONESHOT_DIR}:${PYTHONPATH}
 
-# vLLM settings (from One-Shot-RLVR training script + SDPO verl_training.sh)
-export VLLM_ATTENTION_BACKEND=XFORMERS
+# vLLM settings (from SDPO verl_training.sh)
+# V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
+unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
 
