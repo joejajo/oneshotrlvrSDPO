@@ -114,6 +114,7 @@ SMOKE_OUT=$(mktemp -d)
 trap 'rm -rf "${SMOKE_OUT}"' EXIT
 
 unset VLLM_ATTENTION_BACKEND
+unset ROCR_VISIBLE_DEVICES
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
 

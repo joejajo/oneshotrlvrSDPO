@@ -46,6 +46,7 @@ export PYTHONPATH=${ONESHOT_DIR}:${PYTHONPATH}
 # vLLM settings (from SDPO verl_training.sh)
 # V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
 unset VLLM_ATTENTION_BACKEND
+unset ROCR_VISIBLE_DEVICES
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
 
