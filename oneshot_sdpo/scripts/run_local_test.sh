@@ -107,6 +107,9 @@ if ! python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; the
     exit 0
 fi
 
+N_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
+echo "  Detected ${N_GPUS} GPU(s) — running 1 training step with n_gpus_per_node=${N_GPUS}"
+
 SMOKE_OUT=$(mktemp -d)
 trap 'rm -rf "${SMOKE_OUT}"' EXIT
 
@@ -172,7 +175,7 @@ python -m verl.trainer.main_ppo \
     custom_reward_function.name=compute_score \
     \
     'trainer.logger=["console"]' \
-    trainer.n_gpus_per_node=4 \
+    trainer.n_gpus_per_node="${N_GPUS}" \
     trainer.nnodes=1 \
     trainer.total_training_steps=1 \
     trainer.save_freq=0 \
