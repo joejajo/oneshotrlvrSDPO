@@ -13,7 +13,7 @@
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
-ONESHOT_DIR=${PROJECT_ROOT}/oneshot_sdpo
+ONESHOT_DIR=${PROJECT_ROOT}
 OUTPUT_ROOT=${PROJECT_ROOT}/output
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B

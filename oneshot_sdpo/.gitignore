@@ -1,6 +1,0 @@
-output/
-data/datasets/
-__pycache__/
-*.pyc
-*.pyo
-.env
