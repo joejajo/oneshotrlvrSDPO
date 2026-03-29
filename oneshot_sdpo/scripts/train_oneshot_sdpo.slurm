@@ -8,10 +8,12 @@
 #SBATCH --time=16:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
+# NOTE: SBATCH directives cannot use shell variables. If your HPC username differs
+#       from iwi7107h, update the two lines above before submitting.
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
-ONESHOT_DIR=${PROJECT_ROOT}
+ONESHOT_DIR=${PROJECT_ROOT}/oneshot_sdpo
 OUTPUT_ROOT=${PROJECT_ROOT}/output
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
