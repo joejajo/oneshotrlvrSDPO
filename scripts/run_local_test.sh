@@ -125,7 +125,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
-    'actor_rollout_ref.model.override_config={"attn_implementation":"eager"}' \
+    actor_rollout_ref.model.override_config.attn_implementation=eager \
     \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
