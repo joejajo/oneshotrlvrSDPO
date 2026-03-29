@@ -9,7 +9,7 @@
 #          --mem=200GB --time=00:30:00
 #
 # Usage:
-#   conda activate sdpo
+#   conda activate sdpo2
 #   cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/oneshot_sdpo
 #   bash scripts/run_local_test.sh
 #
@@ -117,6 +117,8 @@ unset VLLM_ATTENTION_BACKEND
 unset ROCR_VISIBLE_DEVICES
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
+SDPO_DIR=/home/woody/iwi7/iwi7107h/SDPO
+export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH}"
 
 python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \

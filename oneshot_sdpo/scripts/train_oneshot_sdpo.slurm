@@ -29,7 +29,7 @@ TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts
 
 # ── Environment ───────────────────────────────────────────────────────────────
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate sdpo
+conda activate sdpo2
 
 export WANDB_MODE=disabled
 export WANDB_DISABLED=true
@@ -39,7 +39,9 @@ export WANDB_DISABLED=true
 export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 
 # Make reward module importable (verl also loads it via path directly)
-export PYTHONPATH=${ONESHOT_DIR}:${PYTHONPATH}
+# Also include SDPO repo root for editable install consistency
+SDPO_DIR=/home/woody/iwi7/iwi7107h/SDPO
+export PYTHONPATH=${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH}
 
 # vLLM settings (from SDPO verl_training.sh)
 # V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
@@ -96,7 +98,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.rollout.max_model_len=5120 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=8192 \
+    actor_rollout_ref.rollout.val_kwargs.n=16 \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
