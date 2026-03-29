@@ -12,7 +12,7 @@ single math problem — the One-Shot-RLVR data regime.
   - Successful rollouts become token-level demonstrations for failed ones
   - EMA teacher (update rate 0.05) provides soft targets
   - Loss = JSD(student, teacher) weighted by token-level IS correction
-  - KL penalty vs frozen ref model (`kl_loss_coef=0.001`)
+  - No separate KL penalty — SDPO is incompatible with shared-ref KL regularization; EMA teacher provides all regularization
   - GRPO advantages computed but unused — success/failure determined by reward score
 - **Reward**: binary (1.0 correct / 0.0 incorrect), `\boxed{}` extraction + SymPy fallback
 - **Evaluation**: MATH-500 (greedy decoding, same reward logic)
@@ -165,8 +165,8 @@ Each training step:
                   failed  = responses with score=0.0
                   build reprompt: failed response + EMA teacher demonstration
   4. Loss:      SDPO_loss = JSD(student, teacher)   [alpha=0.5]
-                           + kl_loss_coef * KL(actor||ref)
                            * IS_weight (token-level, clipped at 2.0)
+               No KL penalty vs ref — SDPO uses EMA teacher as sole regularizer
   5. Update:    gradient step on actor
                 EMA teacher: θ_t ← 0.95·θ_t + 0.05·θ_actor
 
