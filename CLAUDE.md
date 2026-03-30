@@ -313,7 +313,7 @@ data_source  prompt  ability  reward_model  extra_info
 | numpy | 1.26.4 (<2.0.0) | **2.1.0** | requirements.txt pins 2.1.0; numpy 2.x IS supported |
 | conda env | sdpo2 | sdpo_a100 | Fresh env, A100-specific |
 
-**Full install sequence (run on HPC login node)**:
+**Full install sequence — confirmed working on HPC (run on login node)**:
 
 ```bash
 module load python/3.12-conda
@@ -325,26 +325,33 @@ export CONDA_PKGS_DIRS=/home/woody/iwi7/iwi7107h/conda_pkgs
 export PIP_CACHE_DIR=/home/woody/iwi7/iwi7107h/.cache/pip
 export XDG_CACHE_HOME=/home/woody/iwi7/iwi7107h/.cache
 export TMPDIR=/home/woody/iwi7/iwi7107h/.tmp
+
 mkdir -p /home/woody/iwi7/iwi7107h/.cache/pip
 mkdir -p /home/woody/iwi7/iwi7107h/.tmp
+
+# Clean up any previous attempt
+conda deactivate || true
+conda env remove -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100 -y 2>/dev/null || true
 
 conda create -y -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100 python=3.12
 conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
 
 python -m pip install --upgrade pip setuptools wheel
 
-# Ampere/Hopper torch (from SDPO README)
+# 1. Ampere/Hopper torch (SDPO README recommendation for A100)
 pip install torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# Install SDPO (verl fork) + all dependencies from requirements.txt
 cd /home/woody/iwi7/iwi7107h/SDPO
+
+# 2. Core SDPO install: requirements.txt + editable verl fork
 pip install -r requirements.txt
 pip install -e .
 
-# Install vLLM explicitly (requirements.txt may not pin it)
+# 3. vLLM — install explicitly after SDPO deps to pin version
 pip install "vllm==0.8.4"
 
-# Build flash-attn from source AFTER vllm so it matches the final torch ABI
+# 4. Flash-attn — build from source AFTER vllm so it matches final torch ABI
+#    (requirements-cuda.txt is just one line: flash-attn)
 export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
 export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
@@ -356,7 +363,9 @@ MAX_JOBS=4 pip install flash-attn --no-build-isolation
 ```python
 import torch; print(torch.__version__)          # 2.5.1+cu124
 import vllm; print(vllm.__version__)             # 0.8.4
-import flash_attn; print(flash_attn.__version__) # latest compiled
+import flash_attn; print(flash_attn.__version__) # compiled version
+import numpy; print(numpy.__version__)           # 2.1.0
+import ray; print(ray.__version__)               # 2.53.0
 import verl; print(verl.__file__)                # .../SDPO/verl/__init__.py
 from verl.trainer.ppo.core_algos import compute_self_distillation_loss  # must not error
 ```
