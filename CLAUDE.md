@@ -10,7 +10,7 @@ of GRPO.
 |---|---|---|
 | **Data** (π₁, 128 copies) | https://github.com/ypwang61/One-Shot-RLVR | Single training example duplicated 128× |
 | **Reward** (binary boxed-answer check) | One-Shot-RLVR `deepscaler.py` | 1.0 if `\boxed{}` matches ground truth, else 0.0 |
-| **Training algorithm** | https://github.com/lasgroup/SDPO | SDPO: EMA teacher + JSD distillation loss |
+| **Training algorithm** | https://github.com/lasgroup/SDPO (paper: https://arxiv.org/abs/2601.20802) | SDPO: EMA teacher + JSD distillation loss |
 | **Base model** | Qwen2.5-Math-1.5B | Same as One-Shot-RLVR paper |
 | **Eval** | MATH-500 | pass@1, greedy (temp=0) |
 
@@ -97,6 +97,25 @@ Key differences vs our SDPO implementation:
 
 ---
 
+## One-Shot-RLVR Baseline Results (GRPO, Qwen2.5-Math-1.5B)
+
+These are the numbers we are trying to match or beat with SDPO:
+
+| Model | MATH-500 |
+|---|---|
+| Qwen2.5-Math-1.5B base | ~36% (pre-training only) |
+| 1-shot RLVR (π₁, GRPO) | improves significantly |
+| Full DSR-sub RLVR (1209 examples, GRPO) | upper bound |
+
+For DeepSeek-R1-Distill-Qwen-1.5B results on MATH-500 (avg@16, 8k eval):
+- Base: 76.7%
+- 1-shot RLVR: **80.5%** (+3.8pp)
+- 4-shot: 81.2%, 16-shot: 83.3%, full (1.2k): 84.4%
+
+Key insight: even 1 training example closes most of the gap to full-dataset RLVR.
+
+---
+
 ## What SDPO Does (Algorithm)
 
 SDPO (Self-Distilled Policy Optimization) extends GRPO with:
@@ -143,7 +162,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | Key | SDPO default | Our override | Reason |
 |---|---|---|---|
 | `policy_loss.loss_mode` | `"vanilla"` | `sdpo` | **Required** for SDPO loss |
-| `self_distillation.success_reward_threshold` | `0.5` | `1.0` | Binary reward; only perfect = teacher |
+| `self_distillation.success_reward_threshold` | `0.5` (YAML) / `1.0` (docs — docs are wrong, YAML is authoritative) | `1.0` | Binary reward; only perfect = teacher |
 | `self_distillation.include_environment_feedback` | `True` | `false` | Math: no text feedback exists |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
 | `self_distillation.max_reprompt_len` | `10240` | `4096` | No feedback text; just solution |
