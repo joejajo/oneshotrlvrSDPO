@@ -168,5 +168,5 @@ python -m verl.trainer.main_ppo \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.default_hdfs_dir=null \
-    ray_kwargs.ray_init.object_store_memory=2147483648 \
+    +ray_kwargs.ray_init.object_store_memory=2147483648 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"

@@ -211,7 +211,7 @@ python -m verl.trainer.main_ppo \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${SMOKE_OUT}/checkpoints" \
     trainer.default_hdfs_dir=null \
-    ray_kwargs.ray_init.object_store_memory=1073741824
+    +ray_kwargs.ray_init.object_store_memory=1073741824
 
 echo ">>> Step 4 passed."
 
