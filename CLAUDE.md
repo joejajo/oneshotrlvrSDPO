@@ -377,20 +377,21 @@ from verl.trainer.ppo.core_algos import compute_self_distillation_loss  # must n
 ```
 oneshotrlvrSDPO/
 ├── CLAUDE.md                         ← this file
-└── oneshot_sdpo/
-    ├── data/
-    │   ├── pi1_r128.parquet          ← 128 copies of π₁ (One-Shot-RLVR training set)
-    │   ├── math500.parquet           ← MATH-500 (validation)
-    │   └── pi1_example.json          ← π₁ raw problem for reference
-    ├── reward/
-    │   └── math_reward.py            ← compute_score() for NaiveRewardManager
-    ├── eval/
-    │   ├── eval_math500.py           ← standalone MATH-500 eval
-    │   └── eval_math500.slurm
-    └── scripts/
-        ├── train_oneshot_sdpo.slurm  ← MAIN training job (4× A100)
-        ├── run_local_test.sh         ← smoke test (Steps 1-4)
-        └── setup_hpc.sh              ← one-time HPC env setup
+├── README.md
+├── requirements.txt
+├── data/
+│   ├── pi1_r128.parquet              ← 128 copies of π₁ (One-Shot-RLVR training set)
+│   ├── math500.parquet               ← MATH-500 (validation)
+│   └── pi1_example.json              ← π₁ raw problem for reference
+├── reward/
+│   └── math_reward.py                ← compute_score() for NaiveRewardManager
+├── eval/
+│   ├── eval_math500.py               ← standalone MATH-500 eval
+│   └── eval_math500.slurm
+└── scripts/
+    ├── train_oneshot_sdpo.slurm      ← MAIN training job (4× A100)
+    ├── run_local_test.sh             ← smoke test (Steps 1-4)
+    └── setup_hpc.sh                  ← one-time HPC env setup
 ```
 
 HPC layout:
@@ -415,11 +416,11 @@ git pull origin claude/integrate-rlvr-sdpo-dlMU5
 # Smoke test (needs 1 GPU)
 salloc --partition=a100 --gres=gpu:a100:1 --ntasks=1 --cpus-per-task=8 --mem=80GB --time=00:30:00
 conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
-cd oneshot_sdpo
+cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 bash scripts/run_local_test.sh
 
 # Production training (4× A100)
-sbatch oneshot_sdpo/scripts/train_oneshot_sdpo.slurm
+sbatch scripts/train_oneshot_sdpo.slurm
 ```
 
 ---
