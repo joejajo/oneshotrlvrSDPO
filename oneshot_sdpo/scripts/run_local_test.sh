@@ -124,9 +124,10 @@ SDPO_DIR=/home/woody/iwi7/iwi7107h/SDPO
 ray stop --force 2>/dev/null || true
 sleep 2
 
-# Ray writes sockets and shared-memory segments to RAY_TMPDIR.
-# /tmp on cluster nodes is often tiny (few GB). Redirect to home-dir scratch.
-export RAY_TMPDIR=/home/woody/iwi7/iwi7107h/tmp/ray_smoke_$$
+# AF_UNIX socket paths are capped at 107 bytes on Linux.
+# Ray appends ~63 chars (/ray/session_<date>_<pid>/sockets/plasma_store),
+# so RAY_TMPDIR must be ≤ 44 chars. Use a short /tmp sub-dir.
+export RAY_TMPDIR=/tmp/rs$$
 mkdir -p "${RAY_TMPDIR}"
 trap 'rm -rf "${SMOKE_OUT}" "${RAY_TMPDIR}"' EXIT
 

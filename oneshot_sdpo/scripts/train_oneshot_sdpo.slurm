@@ -50,14 +50,14 @@ unset ROCR_VISIBLE_DEVICES
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
 
-# Ray temp dir: /tmp on cluster compute nodes is often small (few GB).
-# Redirect to home-dir scratch so Ray sockets and plasma store have room.
-export RAY_TMPDIR=${OUTPUT_ROOT}/ray_tmp_${SLURM_JOB_ID}
+# AF_UNIX socket paths are capped at 107 bytes on Linux.
+# Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
+export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
 
 # Raise open-file-descriptor limit — Ray + vLLM open many sockets.
 ulimit -n 65536 2>/dev/null || true
 
-mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
+mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR:-/tmp}"
 
 echo "================================================================"
 echo "  One-Shot-RLVR + SDPO training"
