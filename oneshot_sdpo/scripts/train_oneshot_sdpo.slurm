@@ -9,9 +9,12 @@
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
 
+module load python/3.12-conda
+module load cuda/12.4.1
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
-ONESHOT_DIR=${PROJECT_ROOT}
+ONESHOT_DIR=${PROJECT_ROOT}/oneshot_sdpo
 OUTPUT_ROOT=${PROJECT_ROOT}/output
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B

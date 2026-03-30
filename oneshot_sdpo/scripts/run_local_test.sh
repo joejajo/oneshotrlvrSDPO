@@ -82,14 +82,27 @@ import verl
 import vllm
 import ray
 import torch
+import numpy
+import flash_attn
 from torch.utils.tensorboard import SummaryWriter
 import sympy
-print("  verl          : ok")
-print("  vllm          : ok")
-print("  ray           : ok")
-print("  torch         :", torch.__version__)
+from verl.trainer.ppo.core_algos import compute_self_distillation_loss
+
+print("  verl          :", verl.__file__)
+print("  torch         :", torch.__version__)    # expect 2.5.1+cu124
+print("  vllm          :", vllm.__version__)     # expect 0.8.4
+print("  ray           :", ray.__version__)       # expect 2.53.0
+print("  numpy         :", numpy.__version__)     # expect 2.1.0
+print("  flash_attn    :", flash_attn.__version__)
 print("  tensorboard   : ok")
 print("  sympy         :", sympy.__version__)
+print("  compute_self_distillation_loss : ok")
+
+# Verify versions match expected sdpo_a100 env
+assert torch.__version__.startswith("2.5.1"), f"Expected torch 2.5.1, got {torch.__version__}"
+assert vllm.__version__ == "0.8.4", f"Expected vllm 0.8.4, got {vllm.__version__}"
+assert numpy.__version__ == "2.1.0", f"Expected numpy 2.1.0, got {numpy.__version__}"
+print("  Version checks: all OK")
 EOF
 echo ">>> Step 3 passed."
 
