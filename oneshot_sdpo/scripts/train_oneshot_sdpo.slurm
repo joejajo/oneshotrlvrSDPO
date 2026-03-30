@@ -29,7 +29,7 @@ TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts
 
 # ── Environment ───────────────────────────────────────────────────────────────
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate sdpo2
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
 
 export WANDB_MODE=disabled
 export WANDB_DISABLED=true

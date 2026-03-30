@@ -255,42 +255,74 @@ data_source  prompt  ability  reward_model  extra_info
 
 ---
 
-## Environment (sdpo2 conda on HPC)
+## Environment (sdpo_a100 conda on HPC)
 
 **HPC**: `/home/woody/iwi7/iwi7107h/`, A100 (Ampere, sm_80)
+**Conda env path**: `/home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100`
 
 | Package | Version | Notes |
 |---|---|---|
 | Python | 3.12 | |
-| torch | 2.6.0+cu124 | vllm 0.8.5 requires exactly 2.6.0 |
-| vllm | 0.8.5 | |
-| flash-attn | 2.8.3 | cxx11abiFALSE wheel (pip-installed torch) |
-| ray | 2.53.0 | WITHOUT `[default]` — avoids opentelemetry conflict with vllm |
-| numpy | 1.26.4 | verl requires <2.0.0 |
-| verl | SDPO editable | installed from `/home/woody/iwi7/iwi7107h/SDPO` |
+| torch | 2.5.1+cu124 | SDPO README Ampere/Hopper recommendation |
+| vllm | 0.8.4 | 0.8.4 (not 0.8.5) — matches requirements.txt |
+| flash-attn | latest | built from source with `--no-build-isolation` after vllm |
+| ray | from requirements.txt | pinned in `lasgroup/SDPO/requirements.txt` |
+| numpy | <2.0.0 | verl requires <2.0.0 |
+| verl | SDPO editable | `pip install -e .` from `/home/woody/iwi7/iwi7107h/SDPO` |
 
-**Why these exact versions**:
-- `vllm==0.8.5` forces `torch==2.6.0`
-- `flash_attn-2.8.3+cu12torch2.6cxx11abiFALSE` matches torch 2.6.0 pip ABI
-- `ray` without `[default]` avoids `opentelemetry-sdk` version conflict with vllm
-- numpy<2.0.0 required by verl's array compatibility
+**Why these versions (vs old sdpo2 env)**:
 
-**Install flash-attn (exact wheel)**:
+| Package | Old sdpo2 | New sdpo_a100 | Reason for change |
+|---|---|---|---|
+| torch | 2.6.0+cu124 | 2.5.1+cu124 | SDPO README recommends 2.5.1 for Ampere/Hopper |
+| vllm | 0.8.5 | 0.8.4 | Matches SDPO requirements.txt |
+| flash-attn | pre-built wheel | compiled from source | Matches actual torch ABI exactly |
+| conda env | sdpo2 | sdpo_a100 | Fresh env, A100-specific |
+
+**Full install sequence (run on HPC login node)**:
+
 ```bash
-pip install "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3%2Bcu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl"
-```
+module load python/3.12-conda
+module load cuda/12.4.1
 
-**Install SDPO verl fork**:
-```bash
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH
+export CONDA_PKGS_DIRS=/home/woody/iwi7/iwi7107h/conda_pkgs
+export PIP_CACHE_DIR=/home/woody/iwi7/iwi7107h/.cache/pip
+export XDG_CACHE_HOME=/home/woody/iwi7/iwi7107h/.cache
+export TMPDIR=/home/woody/iwi7/iwi7107h/.tmp
+mkdir -p /home/woody/iwi7/iwi7107h/.cache/pip
+mkdir -p /home/woody/iwi7/iwi7107h/.tmp
+
+conda create -y -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100 python=3.12
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
+
+python -m pip install --upgrade pip setuptools wheel
+
+# Ampere/Hopper torch (from SDPO README)
+pip install torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Install SDPO (verl fork) + all dependencies from requirements.txt
 cd /home/woody/iwi7/iwi7107h/SDPO
-pip install -e . --no-deps
+pip install -r requirements.txt
+pip install -e .
+
+# Install vLLM explicitly (requirements.txt may not pin it)
+pip install "vllm==0.8.4"
+
+# Build flash-attn from source AFTER vllm so it matches the final torch ABI
+export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+pip install packaging psutil ninja
+MAX_JOBS=4 pip install flash-attn --no-build-isolation
 ```
 
 **Verify env**:
 ```python
-import torch; print(torch.__version__)          # 2.6.0+cu124
-import vllm; print(vllm.__version__)             # 0.8.5
-import flash_attn; print(flash_attn.__version__) # 2.8.3
+import torch; print(torch.__version__)          # 2.5.1+cu124
+import vllm; print(vllm.__version__)             # 0.8.4
+import flash_attn; print(flash_attn.__version__) # latest compiled
 import verl; print(verl.__file__)                # .../SDPO/verl/__init__.py
 from verl.trainer.ppo.core_algos import compute_self_distillation_loss  # must not error
 ```
@@ -339,7 +371,7 @@ git pull origin claude/integrate-rlvr-sdpo-dlMU5
 
 # Smoke test (needs 1 GPU)
 salloc --partition=a100 --gres=gpu:a100:1 --ntasks=1 --cpus-per-task=8 --mem=80GB --time=00:30:00
-conda activate sdpo2
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
 cd oneshot_sdpo
 bash scripts/run_local_test.sh
 

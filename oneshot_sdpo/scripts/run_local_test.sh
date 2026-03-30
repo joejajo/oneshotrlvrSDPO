@@ -9,7 +9,7 @@
 #          --mem=200GB --time=00:30:00
 #
 # Usage:
-#   conda activate sdpo2
+#   conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
 #   cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/oneshot_sdpo
 #   bash scripts/run_local_test.sh
 #

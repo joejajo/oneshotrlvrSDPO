@@ -23,7 +23,7 @@ echo "================================================================"
 
 # Activate conda env
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate sdpo
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
 
 # ── Step 1: Install SDPO (verl with SDPO modifications) ──────────────────────
 # This installs verl plus all its declared dependencies:
