@@ -220,8 +220,18 @@ def compute_score(
     # Returns: {"score": 0.0|1.0, "extracted_answer": str|None, "is_correct": bool}
 ```
 
-Returns a **dict** (not a float) so that `extracted_answer` and `is_correct` are
-collected into `reward_extra_infos` and written to the SDPO validation JSONL.
+**Important**: The original One-Shot-RLVR `compute_score` returns a **float** (`0.` or `1.`).
+Our version returns a **dict** — this is intentional. SDPO's `NaiveRewardManager` accepts
+both; when a dict is returned it populates `reward_extra_infos` with the extra keys,
+which then appear in the validation JSONL for debugging.
+
+```python
+# One-Shot-RLVR original (float return):
+return 1.  # or 0.
+
+# Our SDPO version (dict return for logging):
+return {"score": 1.0, "extracted_answer": model_answer, "is_correct": True}
+```
 
 Grading: extract `\boxed{}` → `grade_answer_mathd` OR `grade_answer_sympy`.
 Both taken verbatim from One-Shot-RLVR `verl/utils/reward_score/utils/utils.py`.
@@ -336,6 +346,28 @@ bash scripts/run_local_test.sh
 # Production training (4× A100)
 sbatch oneshot_sdpo/scripts/train_oneshot_sdpo.slurm
 ```
+
+---
+
+## Cross-Check: SDPO `run_local_sdpo.sh` Confirms Our Settings
+
+From `lasgroup/SDPO/run_local_sdpo.sh` (the canonical local SDPO run script):
+
+```bash
+TRAIN_BATCH_SIZE=32       # 1 GPU; we use 128 for 4 GPUs
+ROLLOUT_BATCH_SIZE=8      # = rollout.n; matches our n=8
+LR=1e-5                   # their default; we use 1e-6 (more conservative)
+ALPHA=0.5                 # JSD; matches ours
+actor_rollout_ref.actor.optim.lr_warmup_steps=10       # matches ours
+actor_rollout_ref.actor.self_distillation.distillation_topk=100  # matches ours
+actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=True  # matches ours
+algorithm.rollout_correction.rollout_is=token          # matches ours
+actor_rollout_ref.rollout.val_kwargs.n=16              # matches ours
+```
+
+Note: `run_local_sdpo.sh` uses `CONFIG_NAME="sdpo"` (which inherits `user.yaml` and
+requires `TASK` + `EXPERIMENT` env vars set for CSCS cluster). We use `ppo_trainer`
+instead and set all SDPO keys explicitly — same effect, no cluster dependency.
 
 ---
 
