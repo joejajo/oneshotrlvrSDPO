@@ -133,6 +133,13 @@ trap 'rm -rf "${SMOKE_OUT}" "${RAY_TMPDIR}"' EXIT
 
 # Raise open-file-descriptor limit — Ray + vLLM open many sockets.
 ulimit -n 65536 2>/dev/null || true
+
+# Ray plasma store uses /dev/shm by default.
+# SLURM often caps /dev/shm at 64–512 MB, causing the Raylet to crash
+# with "Failed to register worker: End of file" when plasma allocation fails.
+# RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1 allows plasma to fall back to /tmp.
+export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
+
 export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH}"
 
 python -m verl.trainer.main_ppo \
@@ -203,7 +210,8 @@ python -m verl.trainer.main_ppo \
     trainer.experiment_name=smoke_test \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${SMOKE_OUT}/checkpoints" \
-    trainer.default_hdfs_dir=null
+    trainer.default_hdfs_dir=null \
+    ray_kwargs.ray_init.object_store_memory=1073741824
 
 echo ">>> Step 4 passed."
 

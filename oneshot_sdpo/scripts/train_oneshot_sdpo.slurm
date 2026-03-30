@@ -57,6 +57,11 @@ export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
 # Raise open-file-descriptor limit — Ray + vLLM open many sockets.
 ulimit -n 65536 2>/dev/null || true
 
+# Ray plasma store uses /dev/shm by default.
+# SLURM often caps /dev/shm at 64–512 MB, causing the Raylet to crash.
+# Allow plasma to fall back to /tmp if /dev/shm is too small.
+export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
+
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR:-/tmp}"
 
 echo "================================================================"
@@ -163,4 +168,5 @@ python -m verl.trainer.main_ppo \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.default_hdfs_dir=null \
+    ray_kwargs.ray_init.object_store_memory=2147483648 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
