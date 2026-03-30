@@ -118,6 +118,20 @@ unset ROCR_VISIBLE_DEVICES
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
 SDPO_DIR=/home/woody/iwi7/iwi7107h/SDPO
+
+# Kill any stale Ray instance from a previous failed run.
+# Stale Raylits cause "Failed to register worker to Raylet: End of file".
+ray stop --force 2>/dev/null || true
+sleep 2
+
+# Ray writes sockets and shared-memory segments to RAY_TMPDIR.
+# /tmp on cluster nodes is often tiny (few GB). Redirect to home-dir scratch.
+export RAY_TMPDIR=/home/woody/iwi7/iwi7107h/tmp/ray_smoke_$$
+mkdir -p "${RAY_TMPDIR}"
+trap 'rm -rf "${SMOKE_OUT}" "${RAY_TMPDIR}"' EXIT
+
+# Raise open-file-descriptor limit — Ray + vLLM open many sockets.
+ulimit -n 65536 2>/dev/null || true
 export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH}"
 
 python -m verl.trainer.main_ppo \
