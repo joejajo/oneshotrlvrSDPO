@@ -205,6 +205,30 @@ trainer.val_before_train: False  # they skip val; we keep it
 
 ---
 
+## What Files We Need From SDPO (Answer: None Beyond the Editable Install)
+
+**DO NOT copy files from `lasgroup/SDPO/verl/` into this repo.**
+The `pip install -e .` from `/home/woody/iwi7/iwi7107h/SDPO` makes all verl APIs
+available as a Python package. Copying files would create stale duplicates.
+
+| SDPO directory | Do we copy it? | Why |
+|---|---|---|
+| `verl/` (all subdirs) | **NO** | Covered by editable install |
+| `training/verl_training.sh` | **NO** | We have our own slurm + run scripts |
+| `run_local_sdpo.sh` | **NO** | Reference only; we have run_local_test.sh |
+| `examples/` | **NO** | Reference only |
+| `docs/` | **NO** | Documentation only |
+| `requirements.txt` | **NO** | Installed directly from SDPO dir |
+| `requirements-cuda.txt` | **NO** | Just `flash-attn` — covered by install steps |
+
+**`verl/utils/reward_score/__init__.py` — why we bypass it**:
+`default_compute_score` dispatches by `data_source` and raises `NotImplementedError`
+for unknown sources. Our `data_source` is `"deepscaler"` (from One-Shot-RLVR parquet).
+We bypass this entirely by using `custom_reward_function.path` in the Hydra config,
+which loads our `math_reward.py` directly into `NaiveRewardManager`.
+
+---
+
 ## Reward Function Interface
 
 `oneshot_sdpo/reward/math_reward.py` implements `compute_score` matching SDPO's
@@ -215,10 +239,17 @@ def compute_score(
     data_source: str,
     solution_str: str,
     ground_truth,          # from parquet reward_model.ground_truth
-    extra_info=None,
+    extra_info=None,       # NaiveRewardManager adds: num_turns, rollout_reward_scores, truncated
 ) -> dict:
     # Returns: {"score": 0.0|1.0, "extracted_answer": str|None, "is_correct": bool}
 ```
+
+`NaiveRewardManager` populates `extra_info` before calling us:
+- `extra_info["num_turns"]` — number of conversation turns (None for single-turn)
+- `extra_info["rollout_reward_scores"]` — dict of scores from rollout (may be empty)
+- `extra_info["truncated"]` — True if response hit max length without EOS
+
+Our `compute_score` ignores these extra fields (they're not needed for binary math reward).
 
 **Important**: The original One-Shot-RLVR `compute_score` returns a **float** (`0.` or `1.`).
 Our version returns a **dict** — this is intentional. SDPO's `NaiveRewardManager` accepts
@@ -264,10 +295,11 @@ data_source  prompt  ability  reward_model  extra_info
 |---|---|---|
 | Python | 3.12 | |
 | torch | 2.5.1+cu124 | SDPO README Ampere/Hopper recommendation |
-| vllm | 0.8.4 | 0.8.4 (not 0.8.5) — matches requirements.txt |
-| flash-attn | latest | built from source with `--no-build-isolation` after vllm |
-| ray | from requirements.txt | pinned in `lasgroup/SDPO/requirements.txt` |
-| numpy | <2.0.0 | verl requires <2.0.0 |
+| vllm | 0.8.4 | matches SDPO requirements.txt comment for GH200/A100 |
+| flash-attn | latest | built from source after vllm (`requirements-cuda.txt` = just `flash-attn`) |
+| ray | 2.53.0 **with** `[default]` | SDPO `requirements.txt` pins `ray[default]==2.53.0` |
+| numpy | 2.1.0 | SDPO `requirements.txt` pins `numpy==2.1.0` (NOT <2.0.0) |
+| transformers | 4.57.1 | SDPO `requirements.txt` |
 | verl | SDPO editable | `pip install -e .` from `/home/woody/iwi7/iwi7107h/SDPO` |
 
 **Why these versions (vs old sdpo2 env)**:
@@ -277,6 +309,8 @@ data_source  prompt  ability  reward_model  extra_info
 | torch | 2.6.0+cu124 | 2.5.1+cu124 | SDPO README recommends 2.5.1 for Ampere/Hopper |
 | vllm | 0.8.5 | 0.8.4 | Matches SDPO requirements.txt |
 | flash-attn | pre-built wheel | compiled from source | Matches actual torch ABI exactly |
+| ray | without [default] | **with [default]** | requirements.txt pins `ray[default]==2.53.0` |
+| numpy | 1.26.4 (<2.0.0) | **2.1.0** | requirements.txt pins 2.1.0; numpy 2.x IS supported |
 | conda env | sdpo2 | sdpo_a100 | Fresh env, A100-specific |
 
 **Full install sequence (run on HPC login node)**:
