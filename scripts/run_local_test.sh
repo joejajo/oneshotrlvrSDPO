@@ -22,6 +22,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ONESHOT_DIR="$(dirname "${SCRIPT_DIR}")"
+SDPO_DIR="${ONESHOT_DIR}/SDPO"
 
 echo "================================================================"
 echo "  One-Shot-RLVR + SDPO — pre-flight smoke test"
@@ -149,6 +150,10 @@ ulimit -n 65536 2>/dev/null || true
 
 # Allow plasma store to fall back to /tmp if /dev/shm is too small.
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
+
+# ONESHOT_DIR: top-level repo (reward/math_reward.py, data/ live here)
+# SDPO_DIR:    SDPO clone inside it (verl package source)
+export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
 
 python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \
