@@ -9,6 +9,8 @@
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
 
+set -euo pipefail
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
@@ -112,6 +114,8 @@ echo "================================================================"
 # val_kwargs: pre-declared in rollout.yaml with correct defaults
 #   (temperature=0, n=1, do_sample=False) — no override needed.
 
+command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
+
 apptainer exec --nv \
     --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
     --bind "/home/woody/iwi7/iwi7107h/models:/home/woody/iwi7/iwi7107h/models" \
@@ -127,12 +131,12 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.temperature=0.6 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.rollout.max_model_len=8192 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
-    actor_rollout_ref.rollout.val_kwargs.n=16 \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
@@ -165,7 +169,6 @@ apptainer exec --nv \
     data.train_files="[${TRAIN_PARQUET}]" \
     data.val_files="[${EVAL_PARQUET}]" \
     data.train_batch_size=128 \
-    data.val_batch_size=530 \
     data.max_prompt_length=1024 \
     data.max_response_length=4096 \
     data.filter_overlong_prompts=True \
