@@ -174,6 +174,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.is_clip` | `2` | `2.0` | Same as default |
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
+| `model.dtype` | not set | `bfloat16` | Required for Flash Attention 2 |
 | `ppo_mini_batch_size` | `256` | `128` | 4 GPUs, match per-GPU load |
 | `optim.lr` | `1e-6` | `1e-6` | Same as default |
 | `optim.lr_warmup_steps` | `-1` | `10` | Brief warmup for one-shot |
@@ -188,7 +189,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `n` | `1` | `8` | 8 rollouts per prompt (same as SDPO) |
 | `val_kwargs.n` | `1` | `16` | Stable pass@1 estimate (SDPO experiments) |
 | `temperature` | `1.0` | `0.6` | Qwen2.5-Math-1.5B recommended |
-| `gpu_memory_utilization` | `0.5` | `0.7` | A100 80GB |
+| `gpu_memory_utilization` | `0.5` | `0.7` | A100-SXM4-40GB (production); `0.6` in smoke test |
 | `tensor_model_parallel_size` | `2` | `1` | 1.5B model fits on 1 GPU |
 
 ### sdpo.yaml (SDPO cluster config, NOT used directly)
@@ -205,21 +206,22 @@ trainer.val_before_train: False  # they skip val; we keep it
 
 ---
 
-## What Files We Need From SDPO (Answer: None Beyond the Editable Install)
+## What Files We Need From SDPO (Answer: None — Use PYTHONPATH)
 
 **DO NOT copy files from `lasgroup/SDPO/verl/` into this repo.**
-The `pip install -e .` from `/home/woody/iwi7/iwi7107h/SDPO` makes all verl APIs
-available as a Python package. Copying files would create stale duplicates.
+The Apptainer container is **read-only**, so `pip install -e .` cannot be used inside it.
+Instead, the SDPO source is accessed via `PYTHONPATH` pointing at the local clone.
+Copying files would create stale duplicates.
 
 | SDPO directory | Do we copy it? | Why |
 |---|---|---|
-| `verl/` (all subdirs) | **NO** | Covered by editable install |
+| `verl/` (all subdirs) | **NO** | Loaded via `PYTHONPATH=${ONESHOT_DIR}/SDPO` |
 | `training/verl_training.sh` | **NO** | We have our own slurm + run scripts |
 | `run_local_sdpo.sh` | **NO** | Reference only; we have run_local_test.sh |
 | `examples/` | **NO** | Reference only |
 | `docs/` | **NO** | Documentation only |
-| `requirements.txt` | **NO** | Installed directly from SDPO dir |
-| `requirements-cuda.txt` | **NO** | Just `flash-attn` — covered by install steps |
+| `requirements.txt` | **NO** | Pre-installed in the container image |
+| `requirements-cuda.txt` | **NO** | Pre-installed in the container image |
 
 **`verl/utils/reward_score/__init__.py` — why we bypass it**:
 `default_compute_score` dispatches by `data_source` and raises `NotImplementedError`
@@ -286,75 +288,68 @@ data_source  prompt  ability  reward_model  extra_info
 
 ---
 
-## Environment (sdpo_vllm conda on HPC)
+## Environment — Apptainer (confirmed working baseline)
 
 **HPC**: `/home/woody/iwi7/iwi7107h/`, A100-SXM4-40GB (Ampere, sm_80)
-**Conda env path**: `/home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm`
+**Runtime**: Apptainer 1.4.5 — Docker is NOT available on this HPC
+**Image**: `docker://verlai/verl:vllm017.latest`
+**Image path**: `/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif`
+
+Versions **inside the container** (Step 4 smoke test passes):
 
 | Package | Version | Notes |
 |---|---|---|
-| Python | 3.12 | |
-| torch | 2.6.0+cu124 | confirmed working (`pip check` clean) |
-| vllm | 0.8.5 | confirmed working |
-| flash-attn | latest | built from source |
-| ray | 2.53.0 **with** `[default]` | SDPO `requirements.txt` pins `ray[default]==2.53.0` |
-| numpy | 2.1.0 | SDPO `requirements.txt` pins `numpy==2.1.0` (NOT <2.0.0) |
-| transformers | 4.57.1 | SDPO `requirements.txt` |
-| verl | SDPO editable | `pip install -e .` from `oneshotrlvrSDPO/SDPO/` |
+| Python | system `/usr/bin/python` | container-supplied |
+| torch | 2.10.0+cu129 | |
+| vllm | 0.17.0 | |
+| flash-attn | 2.8.3 | |
+| ray | 2.54.0 | |
+| numpy | 1.26.4 | |
+| sympy | 1.14.0 | |
+| verl | SDPO source via PYTHONPATH | container is read-only — `pip install -e .` not possible |
 
-**Full install sequence — confirmed working on HPC (run on login node)**:
+**Key runtime decisions**:
+- `pip install -e .` fails inside the container (read-only filesystem). Do not attempt it.
+- verl loads from: `oneshotrlvrSDPO/SDPO/verl/__init__.py` via `PYTHONPATH`.
+- `rollout.mode=sync` **does not exist** in this VERL version — do not set it.
+- `model.dtype=bfloat16` is required; Flash Attention 2 expects bf16, not float32.
+- No conda env needed. The Apptainer image contains all dependencies.
 
+**Pull the image (one-time, run on login node)**:
 ```bash
-module load python/3.12-conda
-module load cuda/12.4.1
-
-export PYTHONNOUSERSITE=1
-unset PYTHONPATH
-export CONDA_PKGS_DIRS=/home/woody/iwi7/iwi7107h/conda_pkgs
-export PIP_CACHE_DIR=/home/woody/iwi7/iwi7107h/.cache/pip
-export XDG_CACHE_HOME=/home/woody/iwi7/iwi7107h/.cache
-export TMPDIR=/home/woody/iwi7/iwi7107h/.tmp
-
-mkdir -p /home/woody/iwi7/iwi7107h/.cache/pip
-mkdir -p /home/woody/iwi7/iwi7107h/.tmp
-
-conda deactivate || true
-conda env remove -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm -y 2>/dev/null || true
-
-conda create -y -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm python=3.12
-conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
-
-python -m pip install --upgrade pip setuptools wheel
-
-# 1. torch
-pip install torch==2.6.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-
-# 2. Core SDPO install: requirements.txt + editable verl fork
-cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/SDPO
-pip install -r requirements.txt
-pip install -e .
-
-# 3. vLLM — install explicitly after SDPO deps to pin version
-pip install "vllm==0.8.5"
-
-# 4. Flash-attn — build from source AFTER vllm so it matches final torch ABI
-export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
-export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
-pip install packaging psutil ninja
-MAX_JOBS=4 pip install flash-attn --no-build-isolation
+apptainer pull /home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif \
+    docker://verlai/verl:vllm017.latest
 ```
 
-**Verify env**:
-```python
-import torch; print(torch.__version__)          # 2.6.0+cu124
-import vllm; print(vllm.__version__)             # 0.8.5
-import flash_attn; print(flash_attn.__version__) # compiled version
-import numpy; print(numpy.__version__)           # 2.1.0
-import ray; print(ray.__version__)               # 2.53.0
-import verl; print(verl.__file__)                # .../oneshotrlvrSDPO/SDPO/verl/__init__.py
-from verl.trainer.ppo.core_algos import compute_self_distillation_loss  # must not error
+**Verify env inside container**:
+```bash
+apptainer exec --nv \
+  --bind /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO \
+  /home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif \
+  python - <<'PY'
+import sys
+sys.path.insert(0, "/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/SDPO")
+sys.path.insert(0, "/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO")
+import torch, vllm, ray, numpy, flash_attn, sympy, verl
+from verl.trainer.ppo.core_algos import compute_self_distillation_loss
+print("torch      :", torch.__version__)   # 2.10.0+cu129
+print("vllm       :", vllm.__version__)    # 0.17.0
+print("ray        :", ray.__version__)     # 2.54.0
+print("numpy      :", numpy.__version__)   # 1.26.4
+print("flash_attn :", flash_attn.__version__)
+print("verl       :", verl.__file__)       # .../SDPO/verl/__init__.py
+print("compute_self_distillation_loss : ok")
+PY
 ```
+
+**Known benign warnings** (do not affect training correctness):
+
+| Warning | Cause | Fix applied |
+|---------|-------|-------------|
+| `Unsupported processor type: Qwen2TokenizerFast` | verl multimodal processor path; unused for text-only math | `PYTHONWARNINGS="ignore:Unsupported processor type"` |
+| `OSError: [Errno 16] Device or resource busy: pymp-*` | Python multiprocessing temp cleanup on NFS home dir | `TMPDIR=/tmp` (node-local) |
+| `No CUDA runtime is found, using CUDA_HOME='/usr/local/cuda'` | Subprocess inherits host env without module-loaded CUDA | `CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"` |
+| Flash Attention dtype (float32) | Model loaded in float32 instead of bf16 | `actor_rollout_ref.model.dtype=bfloat16` |
 
 ---
 
@@ -384,20 +379,21 @@ HPC layout:
 ```
 /home/woody/iwi7/iwi7107h/
 ├── oneshotrlvrSDPO/        ← this repo
-│   ├── SDPO/               ← lasgroup/SDPO editable install (inside repo, NOT committed)
+│   ├── SDPO/               ← lasgroup/SDPO clone (NOT committed; in .gitignore)
 │   ├── data/
 │   ├── reward/
 │   ├── scripts/
 │   ├── eval/
-│   └── output/             ← checkpoints, logs, rollouts (runtime, not committed)
-├── conda_envs/
-│   └── sdpo_vllm/          ← confirmed working conda env
+│   ├── output/             ← checkpoints, logs (runtime, not committed)
+│   └── outputs/            ← may also exist; runtime only
+├── images/
+│   └── verl_vllm017_latest.sif  ← Apptainer image (confirmed working)
 └── models/
     └── Qwen2.5-Math-1.5B/  ← base model
 ```
 
-**Note**: `SDPO/` lives inside the repo directory on HPC but is NOT committed to git
-(it is in `.gitignore`). It is the `lasgroup/SDPO` clone used for `pip install -e .`.
+**Note**: `SDPO/` is the `lasgroup/SDPO` clone. It is NOT committed to git (in `.gitignore`).
+verl is loaded from it via `PYTHONPATH` — no install step needed at runtime.
 
 ---
 
@@ -408,11 +404,13 @@ HPC layout:
 cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 git pull origin claude/integrate-rlvr-sdpo-dlMU5
 
-# Smoke test (needs 1 GPU)
+# Smoke test via Apptainer (1× A100)
 salloc --partition=a100 --gres=gpu:a100:1 --ntasks=1 --cpus-per-task=8 --mem=80GB --time=00:30:00
-conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
-cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
-bash scripts/run_local_test.sh
+
+apptainer exec --nv \
+  --bind /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO \
+  /home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif \
+  bash /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/scripts/run_local_test.sh
 
 # Production training (4× A100)
 sbatch scripts/train_oneshot_sdpo.slurm
