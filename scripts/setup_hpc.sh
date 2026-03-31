@@ -9,9 +9,9 @@
 # The installed packages persist in the sdpo_a100 conda environment.
 #
 # Prerequisites (see CLAUDE.md "Full install sequence" for full env creation):
-#   - conda env sdpo_a100 exists at /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
-#   - torch 2.5.1, vllm 0.8.4, flash-attn, ray[default]==2.53.0 already installed
-#   - SDPO repo cloned at /home/woody/iwi7/iwi7107h/SDPO
+#   - conda env sdpo_vllm exists at /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
+#   - torch 2.6.0, vllm 0.8.5, flash-attn, ray[default]==2.53.0 already installed
+#   - SDPO repo cloned at /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/SDPO
 
 set -e
 
@@ -25,7 +25,7 @@ echo "================================================================"
 
 # Activate conda env
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
 
 # ── Step 1: Install SDPO (verl with SDPO modifications) ──────────────────────
 # Install verl as an editable package from the local SDPO clone.
@@ -33,7 +33,7 @@ conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
 # requirements.txt covers all deps: tensorboard, pylatexenc, hydra-core,
 #   ray[default]==2.53.0, numpy==2.1.0, accelerate, peft, transformers,
 #   datasets, pandas, pyarrow, sympy, word2number, math-verify, and more.
-SDPO_DIR=/home/woody/iwi7/iwi7107h/SDPO
+SDPO_DIR=${PROJECT_ROOT}/SDPO
 echo ""
 echo ">>> Installing SDPO deps from requirements.txt …"
 pip install -r "${SDPO_DIR}/requirements.txt"
@@ -66,7 +66,7 @@ import sympy
 import pylatexenc
 from verl.trainer.ppo.core_algos import compute_self_distillation_loss
 print("  verl          :", verl.__file__)
-print("  torch         :", torch.__version__)   # expect 2.5.1+cu124
+print("  torch         :", torch.__version__)   # expect 2.6.0+cu124
 print("  numpy         :", numpy.__version__)    # expect 2.1.0
 print("  ray           :", ray.__version__)      # expect 2.53.0
 print("  tensorboard   : ok")
@@ -81,7 +81,7 @@ echo "================================================================"
 echo "  Setup complete."
 echo ""
 echo "  Next steps:"
-echo "    1. cd ${PROJECT_ROOT}/oneshot_sdpo"
+echo "    1. cd ${PROJECT_ROOT}"
 echo "    2. bash scripts/run_local_test.sh"
 echo "    3. sbatch scripts/train_oneshot_sdpo.slurm"
 echo "================================================================"

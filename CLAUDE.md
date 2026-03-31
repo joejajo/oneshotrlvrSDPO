@@ -286,32 +286,21 @@ data_source  prompt  ability  reward_model  extra_info
 
 ---
 
-## Environment (sdpo_a100 conda on HPC)
+## Environment (sdpo_vllm conda on HPC)
 
-**HPC**: `/home/woody/iwi7/iwi7107h/`, A100 (Ampere, sm_80)
-**Conda env path**: `/home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100`
+**HPC**: `/home/woody/iwi7/iwi7107h/`, A100-SXM4-40GB (Ampere, sm_80)
+**Conda env path**: `/home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm`
 
 | Package | Version | Notes |
 |---|---|---|
 | Python | 3.12 | |
-| torch | 2.5.1+cu124 | SDPO README Ampere/Hopper recommendation |
-| vllm | 0.8.4 | matches SDPO requirements.txt comment for GH200/A100 |
-| flash-attn | latest | built from source after vllm (`requirements-cuda.txt` = just `flash-attn`) |
+| torch | 2.6.0+cu124 | confirmed working (`pip check` clean) |
+| vllm | 0.8.5 | confirmed working |
+| flash-attn | latest | built from source |
 | ray | 2.53.0 **with** `[default]` | SDPO `requirements.txt` pins `ray[default]==2.53.0` |
 | numpy | 2.1.0 | SDPO `requirements.txt` pins `numpy==2.1.0` (NOT <2.0.0) |
 | transformers | 4.57.1 | SDPO `requirements.txt` |
-| verl | SDPO editable | `pip install -e .` from `/home/woody/iwi7/iwi7107h/SDPO` |
-
-**Why these versions (vs old sdpo2 env)**:
-
-| Package | Old sdpo2 | New sdpo_a100 | Reason for change |
-|---|---|---|---|
-| torch | 2.6.0+cu124 | 2.5.1+cu124 | SDPO README recommends 2.5.1 for Ampere/Hopper |
-| vllm | 0.8.5 | 0.8.4 | Matches SDPO requirements.txt |
-| flash-attn | pre-built wheel | compiled from source | Matches actual torch ABI exactly |
-| ray | without [default] | **with [default]** | requirements.txt pins `ray[default]==2.53.0` |
-| numpy | 1.26.4 (<2.0.0) | **2.1.0** | requirements.txt pins 2.1.0; numpy 2.x IS supported |
-| conda env | sdpo2 | sdpo_a100 | Fresh env, A100-specific |
+| verl | SDPO editable | `pip install -e .` from `oneshotrlvrSDPO/SDPO/` |
 
 **Full install sequence — confirmed working on HPC (run on login node)**:
 
@@ -329,29 +318,26 @@ export TMPDIR=/home/woody/iwi7/iwi7107h/.tmp
 mkdir -p /home/woody/iwi7/iwi7107h/.cache/pip
 mkdir -p /home/woody/iwi7/iwi7107h/.tmp
 
-# Clean up any previous attempt
 conda deactivate || true
-conda env remove -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100 -y 2>/dev/null || true
+conda env remove -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm -y 2>/dev/null || true
 
-conda create -y -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100 python=3.12
-conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
+conda create -y -p /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm python=3.12
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
 
 python -m pip install --upgrade pip setuptools wheel
 
-# 1. Ampere/Hopper torch (SDPO README recommendation for A100)
-pip install torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-
-cd /home/woody/iwi7/iwi7107h/SDPO
+# 1. torch
+pip install torch==2.6.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # 2. Core SDPO install: requirements.txt + editable verl fork
+cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/SDPO
 pip install -r requirements.txt
 pip install -e .
 
 # 3. vLLM — install explicitly after SDPO deps to pin version
-pip install "vllm==0.8.4"
+pip install "vllm==0.8.5"
 
 # 4. Flash-attn — build from source AFTER vllm so it matches final torch ABI
-#    (requirements-cuda.txt is just one line: flash-attn)
 export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
 export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
@@ -361,12 +347,12 @@ MAX_JOBS=4 pip install flash-attn --no-build-isolation
 
 **Verify env**:
 ```python
-import torch; print(torch.__version__)          # 2.5.1+cu124
-import vllm; print(vllm.__version__)             # 0.8.4
+import torch; print(torch.__version__)          # 2.6.0+cu124
+import vllm; print(vllm.__version__)             # 0.8.5
 import flash_attn; print(flash_attn.__version__) # compiled version
 import numpy; print(numpy.__version__)           # 2.1.0
 import ray; print(ray.__version__)               # 2.53.0
-import verl; print(verl.__file__)                # .../SDPO/verl/__init__.py
+import verl; print(verl.__file__)                # .../oneshotrlvrSDPO/SDPO/verl/__init__.py
 from verl.trainer.ppo.core_algos import compute_self_distillation_loss  # must not error
 ```
 
@@ -398,11 +384,20 @@ HPC layout:
 ```
 /home/woody/iwi7/iwi7107h/
 ├── oneshotrlvrSDPO/        ← this repo
-├── SDPO/                   ← lasgroup/SDPO editable install
-├── models/
-│   └── Qwen2.5-Math-1.5B/  ← base model
-└── output/                 ← checkpoints, logs, rollouts (runtime, not committed)
+│   ├── SDPO/               ← lasgroup/SDPO editable install (inside repo, NOT committed)
+│   ├── data/
+│   ├── reward/
+│   ├── scripts/
+│   ├── eval/
+│   └── output/             ← checkpoints, logs, rollouts (runtime, not committed)
+├── conda_envs/
+│   └── sdpo_vllm/          ← confirmed working conda env
+└── models/
+    └── Qwen2.5-Math-1.5B/  ← base model
 ```
+
+**Note**: `SDPO/` lives inside the repo directory on HPC but is NOT committed to git
+(it is in `.gitignore`). It is the `lasgroup/SDPO` clone used for `pip install -e .`.
 
 ---
 
@@ -415,7 +410,7 @@ git pull origin claude/integrate-rlvr-sdpo-dlMU5
 
 # Smoke test (needs 1 GPU)
 salloc --partition=a100 --gres=gpu:a100:1 --ntasks=1 --cpus-per-task=8 --mem=80GB --time=00:30:00
-conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
 cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 bash scripts/run_local_test.sh
 

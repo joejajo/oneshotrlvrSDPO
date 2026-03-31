@@ -1,4 +1,6 @@
 output/
+outputs/
+SDPO/
 data/datasets/
 __pycache__/
 *.pyc

@@ -32,7 +32,7 @@ TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts
 
 # ── Environment ───────────────────────────────────────────────────────────────
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
 
 export WANDB_MODE=disabled
 export WANDB_DISABLED=true
@@ -43,7 +43,7 @@ export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 
 # Make reward module importable (verl also loads it via path directly)
 # Also include SDPO repo root for editable install consistency
-SDPO_DIR=/home/woody/iwi7/iwi7107h/SDPO
+SDPO_DIR=${PROJECT_ROOT}/SDPO
 export PYTHONPATH=${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH}
 
 # vLLM settings (from SDPO verl_training.sh)

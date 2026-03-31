@@ -9,8 +9,8 @@
 #          --mem=200GB --time=00:30:00
 #
 # Usage:
-#   conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_a100
-#   cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/oneshot_sdpo
+#   conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
+#   cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 #   bash scripts/run_local_test.sh
 #
 # Override the model path if needed:
@@ -89,8 +89,8 @@ import sympy
 from verl.trainer.ppo.core_algos import compute_self_distillation_loss
 
 print("  verl          :", verl.__file__)
-print("  torch         :", torch.__version__)    # expect 2.5.1+cu124
-print("  vllm          :", vllm.__version__)     # expect 0.8.4
+print("  torch         :", torch.__version__)    # expect 2.6.0+cu124
+print("  vllm          :", vllm.__version__)     # expect 0.8.5
 print("  ray           :", ray.__version__)       # expect 2.53.0
 print("  numpy         :", numpy.__version__)     # expect 2.1.0
 print("  flash_attn    :", flash_attn.__version__)
@@ -98,9 +98,9 @@ print("  tensorboard   : ok")
 print("  sympy         :", sympy.__version__)
 print("  compute_self_distillation_loss : ok")
 
-# Verify versions match expected sdpo_a100 env
-assert torch.__version__.startswith("2.5.1"), f"Expected torch 2.5.1, got {torch.__version__}"
-assert vllm.__version__ == "0.8.4", f"Expected vllm 0.8.4, got {vllm.__version__}"
+# Verify versions match expected sdpo_vllm env
+assert torch.__version__.startswith("2.6.0"), f"Expected torch 2.6.0, got {torch.__version__}"
+assert vllm.__version__ == "0.8.5", f"Expected vllm 0.8.5, got {vllm.__version__}"
 assert numpy.__version__ == "2.1.0", f"Expected numpy 2.1.0, got {numpy.__version__}"
 print("  Version checks: all OK")
 EOF
@@ -130,7 +130,7 @@ unset VLLM_ATTENTION_BACKEND
 unset ROCR_VISIBLE_DEVICES
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
-SDPO_DIR=/home/woody/iwi7/iwi7107h/SDPO
+SDPO_DIR="${ONESHOT_DIR}/SDPO"
 
 # Kill any stale Ray instance from a previous failed run.
 # Stale Raylits cause "Failed to register worker to Raylet: End of file".
