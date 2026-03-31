@@ -1,20 +1,16 @@
 #!/bin/bash
-# Pre-flight smoke test for One-Shot-RLVR + SDPO.
+# Pre-flight smoke test for One-Shot-RLVR + SDPO inside Apptainer.
 #
-# Steps 1-3 run on the LOGIN NODE (no GPU needed).
-# Step 4 (one training iteration) requires a GPU — run inside an interactive
-# GPU allocation or on a compute node:
+# Run from a GPU shell, then:
+#   apptainer exec --nv \
+#     --bind /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO \
+#     /home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif \
+#     bash
 #
-#   salloc --partition=a100 --gres=gpu:a100:4 --ntasks=1 --cpus-per-task=16 \
-#          --mem=200GB --time=00:30:00
-#
-# Usage:
-#   conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
+# Inside container:
+#   export PYTHONPATH=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/SDPO:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO:${PYTHONPATH:-}
 #   cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 #   bash scripts/run_local_test.sh
-#
-# Override the model path if needed:
-#   MODEL_PATH=/path/to/model bash scripts/run_local_test.sh
 
 MODEL_PATH="${MODEL_PATH:-/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B}"
 
@@ -31,11 +27,20 @@ echo "================================================================"
 
 cd "${ONESHOT_DIR}"
 
-# ── Step 1: Validate committed parquet files ──────────────────────────────────
+export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
+
+unset TRANSFORMERS_CACHE
+export HF_HOME="${ONESHOT_DIR}/.hf_home"
+export XDG_CACHE_HOME="${ONESHOT_DIR}/.cache"
+mkdir -p "${HF_HOME}" "${XDG_CACHE_HOME}"
+
+unset ROCR_VISIBLE_DEVICES
+unset HIP_VISIBLE_DEVICES
+unset CUDA_VISIBLE_DEVICES
+
 echo ""
 echo ">>> Step 1: parquet file validation"
 
-# Check files exist and start with PAR1 magic bytes
 for f in data/pi1_r128.parquet data/math500.parquet; do
     if [ ! -f "${f}" ]; then
         echo "ERROR: ${f} not found" >&2
@@ -49,7 +54,7 @@ for f in data/pi1_r128.parquet data/math500.parquet; do
     echo "  ${f} : exists, PAR1 magic bytes OK"
 done
 
-python - <<'EOF'
+python - <<'PY'
 import pandas as pd
 
 train = pd.read_parquet("data/pi1_r128.parquet")
@@ -66,19 +71,18 @@ assert expected_cols.issubset(set(math500.columns)), (
     f"Missing columns in math500.parquet: {expected_cols - set(math500.columns)}"
 )
 print(f"  math500.parquet   : {len(math500)} rows  columns={math500.columns.tolist()}  OK")
-EOF
+PY
 echo ">>> Step 1 passed."
 
-# ── Step 2: Reward self-test ──────────────────────────────────────────────────
 echo ""
 echo ">>> Step 2: reward/math_reward.py self-test"
 python reward/math_reward.py
 echo ">>> Step 2 passed."
 
-# ── Step 3: Key imports ───────────────────────────────────────────────────────
 echo ""
 echo ">>> Step 3: import verification"
-python - <<'EOF'
+python - <<'PY'
+import sys
 import verl
 import vllm
 import ray
@@ -89,45 +93,35 @@ from torch.utils.tensorboard import SummaryWriter
 import sympy
 from verl.trainer.ppo.core_algos import compute_self_distillation_loss
 
+print("  python        :", sys.executable)
 print("  verl          :", verl.__file__)
-print("  torch         :", torch.__version__)    # expect 2.6.0+cu124
-print("  vllm          :", vllm.__version__)     # expect 0.8.5
-print("  ray           :", ray.__version__)       # expect 2.53.0
-print("  numpy         :", numpy.__version__)     # expect 2.1.0
+print("  torch         :", torch.__version__)
+print("  vllm          :", vllm.__version__)
+print("  ray           :", ray.__version__)
+print("  numpy         :", numpy.__version__)
 print("  flash_attn    :", flash_attn.__version__)
 print("  tensorboard   : ok")
 print("  sympy         :", sympy.__version__)
 print("  compute_self_distillation_loss : ok")
-
-# Verify versions match expected sdpo_vllm env
-assert torch.__version__.startswith("2.6.0"), f"Expected torch 2.6.0, got {torch.__version__}"
-assert vllm.__version__ == "0.8.5", f"Expected vllm 0.8.5, got {vllm.__version__}"
-assert numpy.__version__ == "2.1.0", f"Expected numpy 2.1.0, got {numpy.__version__}"
-print("  Version checks: all OK")
-EOF
+PY
 echo ">>> Step 3 passed."
 
-# ── Step 4: One training iteration (requires GPU) ─────────────────────────────
 echo ""
 echo ">>> Step 4: one SDPO training iteration (end-to-end)"
 
 if ! python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
     echo "  WARNING: no GPU detected — skipping Step 4."
-    echo "  Re-run inside an interactive GPU allocation to test training."
-    echo ""
-    echo "================================================================"
-    echo "  === Steps 1-3 passed — request a GPU node for Step 4 ==="
-    echo "================================================================"
+    echo "  Re-run inside an Apptainer shell started with --nv on a GPU node."
     exit 0
 fi
 
-module load cuda/12.4.1
-export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
-export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 export TOKENIZERS_PARALLELISM=false
 export HYDRA_FULL_ERROR=1
-unset TRANSFORMERS_CACHE
+export PYTHONUNBUFFERED=1
+
+unset ROCR_VISIBLE_DEVICES
+unset HIP_VISIBLE_DEVICES
+unset CUDA_VISIBLE_DEVICES
 
 N_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
 echo "  Detected ${N_GPUS} GPU(s)"
@@ -135,26 +129,15 @@ echo "  Detected ${N_GPUS} GPU(s)"
 SMOKE_OUT=$(mktemp -d)
 trap 'rm -rf "${SMOKE_OUT}"' EXIT
 
-# Kill any stale Ray instance from a previous failed run.
 ray stop --force 2>/dev/null || true
 sleep 2
 
-# AF_UNIX socket paths are capped at 107 bytes on Linux.
-# Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars.
 export RAY_TMPDIR=/tmp/rs$$
 mkdir -p "${RAY_TMPDIR}"
 trap 'rm -rf "${SMOKE_OUT}" "${RAY_TMPDIR}"' EXIT
 
-# Raise open-file-descriptor limit — Ray + vLLM open many sockets.
 ulimit -n 65536 2>/dev/null || true
-
-# Allow plasma store to fall back to /tmp if /dev/shm is too small.
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
-export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
-
-unset ROCR_VISIBLE_DEVICES
-unset HIP_VISIBLE_DEVICES
-unset CUDA_VISIBLE_DEVICES
 
 python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \
@@ -163,7 +146,6 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.mode=sync \
     actor_rollout_ref.rollout.n=2 \
     actor_rollout_ref.rollout.temperature=0.6 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
@@ -224,5 +206,5 @@ echo ">>> Step 4 passed."
 
 echo ""
 echo "================================================================"
-echo "  === All checks passed — safe to sbatch ==="
+echo "  === All checks passed — safe to proceed ==="
 echo "================================================================"
