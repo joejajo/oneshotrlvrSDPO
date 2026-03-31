@@ -9,13 +9,11 @@
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
 
-module load python/3.12-conda
-module load cuda/12.4.1
-
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
 OUTPUT_ROOT=${PROJECT_ROOT}/output
+SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
 
@@ -31,8 +29,9 @@ ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts
 TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts
 
 # ── Environment ───────────────────────────────────────────────────────────────
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
+# No conda or module load needed — runtime is supplied by the Apptainer container.
+# All env vars set here are inherited by the container (Apptainer does not clean env
+# by default).
 
 export WANDB_MODE=disabled
 export WANDB_DISABLED=true
@@ -41,10 +40,15 @@ export WANDB_DISABLED=true
 # Logs land at: $TENSORBOARD_DIR/<project_name>/<experiment_name>/
 export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 
-# Make reward module importable (verl also loads it via path directly)
-# Also include SDPO repo root for editable install consistency
+# Make reward module and verl importable inside the container.
 SDPO_DIR=${PROJECT_ROOT}/SDPO
-export PYTHONPATH=${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH}
+export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
+
+# Container ships its own CUDA at /usr/local/cuda — use that as fallback.
+# Do NOT call "module load cuda" here; modules are unavailable inside Apptainer.
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+export PATH="${CUDA_HOME}/bin:${PATH}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
 
 # vLLM settings (from SDPO verl_training.sh)
 # V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
@@ -52,6 +56,15 @@ unset VLLM_ATTENTION_BACKEND
 unset ROCR_VISIBLE_DEVICES
 export VLLM_USE_V1=1
 export PYTHONUNBUFFERED=1
+
+# Suppress known-benign warning from verl's multimodal processor path:
+#   "Unsupported processor type: Qwen2TokenizerFast"
+# This code path is not used for text-only math training.
+export PYTHONWARNINGS="ignore:Unsupported processor type"
+
+# Use node-local /tmp for multiprocessing temp files to avoid NFS-related
+# "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
+export TMPDIR=/tmp
 
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
 # Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
@@ -65,7 +78,7 @@ ulimit -n 65536 2>/dev/null || true
 # Allow plasma to fall back to /tmp if /dev/shm is too small.
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 
-mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR:-/tmp}"
+mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
 echo "  One-Shot-RLVR + SDPO training"
@@ -77,6 +90,7 @@ echo "  Checkpoints : ${CKPT_DIR}"
 echo "  TensorBoard : ${TENSORBOARD_DIR}"
 echo "  Val rollouts: ${ROLLOUT_DIR}"
 echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
+echo "  Container   : ${SIF}"
 echo "================================================================"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -98,10 +112,15 @@ echo "================================================================"
 # val_kwargs: pre-declared in rollout.yaml with correct defaults
 #   (temperature=0, n=1, do_sample=False) — no override needed.
 
-python -m verl.trainer.main_ppo \
+apptainer exec --nv \
+    --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
+    --bind "/home/woody/iwi7/iwi7107h/models:/home/woody/iwi7/iwi7107h/models" \
+    "${SIF}" \
+    python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \
     \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
+    actor_rollout_ref.model.dtype=bfloat16 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
