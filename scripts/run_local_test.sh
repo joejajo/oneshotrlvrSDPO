@@ -115,9 +115,24 @@ if ! python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; the
     exit 0
 fi
 
+# Container ships its own CUDA at /usr/local/cuda — use that as fallback.
+# Do NOT call "module load cuda" here; modules are unavailable inside Apptainer.
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+export PATH="${CUDA_HOME}/bin:${PATH}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
+
 export TOKENIZERS_PARALLELISM=false
 export HYDRA_FULL_ERROR=1
 export PYTHONUNBUFFERED=1
+
+# Suppress known-benign warning from verl's multimodal processor path:
+#   "Unsupported processor type: Qwen2TokenizerFast"
+# This code path is not used for text-only math training.
+export PYTHONWARNINGS="ignore:Unsupported processor type"
+
+# Use node-local /tmp for multiprocessing temp files to avoid NFS-related
+# "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
+export TMPDIR=/tmp
 
 unset ROCR_VISIBLE_DEVICES
 unset HIP_VISIBLE_DEVICES
@@ -145,6 +160,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
+    actor_rollout_ref.model.dtype=bfloat16 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=2 \
     actor_rollout_ref.rollout.temperature=0.6 \
