@@ -152,6 +152,10 @@ ulimit -n 65536 2>/dev/null || true
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
 
+unset ROCR_VISIBLE_DEVICES
+unset HIP_VISIBLE_DEVICES
+unset CUDA_VISIBLE_DEVICES
+
 python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
