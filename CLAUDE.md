@@ -174,7 +174,6 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.is_clip` | `2` | `2.0` | Same as default |
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
-| `model.dtype` | not set | `bfloat16` | Required for Flash Attention 2 |
 | `ppo_mini_batch_size` | `256` | `128` | 4 GPUs, match per-GPU load |
 | `optim.lr` | `1e-6` | `1e-6` | Same as default |
 | `optim.lr_warmup_steps` | `-1` | `10` | Brief warmup for one-shot |
@@ -349,7 +348,7 @@ PY
 | `Unsupported processor type: Qwen2TokenizerFast` | verl multimodal processor path; unused for text-only math | `PYTHONWARNINGS="ignore:Unsupported processor type"` |
 | `OSError: [Errno 16] Device or resource busy: pymp-*` | Python multiprocessing temp cleanup on NFS home dir | `TMPDIR=/tmp` (node-local) |
 | `No CUDA runtime is found, using CUDA_HOME='/usr/local/cuda'` | Subprocess inherits host env without module-loaded CUDA | `CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"` |
-| Flash Attention dtype (float32) | Model loaded in float32 instead of bf16 | `actor_rollout_ref.model.dtype=bfloat16` |
+| Flash Attention dtype (float32) | verl loads model in float32 by default; FA2 prefers bf16 but still works | benign — no fix needed; training proceeds correctly |
 
 ---
 

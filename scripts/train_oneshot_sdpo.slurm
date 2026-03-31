@@ -120,7 +120,6 @@ apptainer exec --nv \
     --config-name ppo_trainer \
     \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
-    actor_rollout_ref.model.dtype=bfloat16 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
