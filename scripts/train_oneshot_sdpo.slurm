@@ -170,7 +170,7 @@ apptainer exec --nv \
     data.val_files="[${EVAL_PARQUET}]" \
     data.train_batch_size=128 \
     data.max_prompt_length=1024 \
-    data.max_response_length=4096 \
+    data.max_response_length=3072 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
     \
