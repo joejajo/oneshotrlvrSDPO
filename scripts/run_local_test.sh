@@ -120,26 +120,26 @@ if ! python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; the
     exit 0
 fi
 
+module load cuda/12.4.1
+export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+export TOKENIZERS_PARALLELISM=false
+export HYDRA_FULL_ERROR=1
+unset TRANSFORMERS_CACHE
+
 N_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
-echo "  Detected ${N_GPUS} GPU(s) — running 1 training step with n_gpus_per_node=${N_GPUS}"
+echo "  Detected ${N_GPUS} GPU(s)"
 
 SMOKE_OUT=$(mktemp -d)
 trap 'rm -rf "${SMOKE_OUT}"' EXIT
 
-unset VLLM_ATTENTION_BACKEND
-unset ROCR_VISIBLE_DEVICES
-export VLLM_USE_V1=1
-export PYTHONUNBUFFERED=1
-SDPO_DIR="${ONESHOT_DIR}/SDPO"
-
 # Kill any stale Ray instance from a previous failed run.
-# Stale Raylits cause "Failed to register worker to Raylet: End of file".
 ray stop --force 2>/dev/null || true
 sleep 2
 
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
-# Ray appends ~63 chars (/ray/session_<date>_<pid>/sockets/plasma_store),
-# so RAY_TMPDIR must be ≤ 44 chars. Use a short /tmp sub-dir.
+# Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars.
 export RAY_TMPDIR=/tmp/rs$$
 mkdir -p "${RAY_TMPDIR}"
 trap 'rm -rf "${SMOKE_OUT}" "${RAY_TMPDIR}"' EXIT
@@ -147,39 +147,30 @@ trap 'rm -rf "${SMOKE_OUT}" "${RAY_TMPDIR}"' EXIT
 # Raise open-file-descriptor limit — Ray + vLLM open many sockets.
 ulimit -n 65536 2>/dev/null || true
 
-# Ray plasma store uses /dev/shm by default.
-# SLURM often caps /dev/shm at 64–512 MB, causing the Raylet to crash
-# with "Failed to register worker: End of file" when plasma allocation fails.
-# RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1 allows plasma to fall back to /tmp.
+# Allow plasma store to fall back to /tmp if /dev/shm is too small.
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
-
-export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH}"
 
 python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \
-    \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
-    \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.n=8 \
+    actor_rollout_ref.rollout.n=2 \
     actor_rollout_ref.rollout.temperature=0.6 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=8192 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
-    \
+    actor_rollout_ref.rollout.max_model_len=2048 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=128 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=8 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=20000 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
     actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
@@ -189,29 +180,24 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1024 \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
-    \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
-    \
     algorithm.adv_estimator=grpo \
     algorithm.norm_adv_by_std_in_grpo=False \
     algorithm.rollout_correction.rollout_is=token \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
-    \
     data.train_files="[${ONESHOT_DIR}/data/pi1_r128.parquet]" \
     data.val_files="[${ONESHOT_DIR}/data/math500.parquet]" \
-    data.train_batch_size=128 \
-    data.val_batch_size=530 \
-    data.max_prompt_length=1024 \
-    data.max_response_length=4096 \
+    data.train_batch_size=8 \
+    data.val_batch_size=8 \
+    data.max_prompt_length=512 \
+    data.max_response_length=512 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
-    \
     custom_reward_function.path="${ONESHOT_DIR}/reward/math_reward.py" \
     custom_reward_function.name=compute_score \
-    \
     'trainer.logger=["console"]' \
     trainer.n_gpus_per_node="${N_GPUS}" \
     trainer.nnodes=1 \
