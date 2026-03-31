@@ -18,7 +18,7 @@
 
 MODEL_PATH="${MODEL_PATH:-/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B}"
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ONESHOT_DIR="$(dirname "${SCRIPT_DIR}")"
@@ -150,9 +150,6 @@ ulimit -n 65536 2>/dev/null || true
 
 # Allow plasma store to fall back to /tmp if /dev/shm is too small.
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
-
-# ONESHOT_DIR: top-level repo (reward/math_reward.py, data/ live here)
-# SDPO_DIR:    SDPO clone inside it (verl package source)
 export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
 
 python -m verl.trainer.main_ppo \
