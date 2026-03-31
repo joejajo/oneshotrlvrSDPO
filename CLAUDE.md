@@ -379,7 +379,14 @@ HPC layout:
 ```
 /home/woody/iwi7/iwi7107h/
 ├── oneshotrlvrSDPO/        ← this repo
-│   ├── SDPO/               ← lasgroup/SDPO clone (NOT committed; in .gitignore)
+│   ├── SDPO/               ← full clone of https://github.com/lasgroup/SDPO
+│   │                          (the ORIGINAL upstream SDPO repo, cloned directly here)
+│   │                          NOT committed to git (in .gitignore)
+│   │                          verl loaded from here via PYTHONPATH at runtime
+│   │   ├── verl/           ← verl fork with SDPO modifications (main source)
+│   │   ├── training/       ← SDPO's own training scripts (reference only)
+│   │   ├── requirements.txt
+│   │   └── ...             ← full lasgroup/SDPO repo contents
 │   ├── data/
 │   ├── reward/
 │   ├── scripts/
@@ -392,8 +399,19 @@ HPC layout:
     └── Qwen2.5-Math-1.5B/  ← base model
 ```
 
-**Note**: `SDPO/` is the `lasgroup/SDPO` clone. It is NOT committed to git (in `.gitignore`).
-verl is loaded from it via `PYTHONPATH` — no install step needed at runtime.
+**`SDPO/` is the complete, unmodified `lasgroup/SDPO` repository** cloned directly inside
+the wrapper repo at `oneshotrlvrSDPO/SDPO/`. It is NOT committed to git (in `.gitignore`).
+This is intentional: by keeping the original SDPO source here, all verl APIs are accessible
+via `PYTHONPATH="${ONESHOT_DIR}/SDPO"` — no install step is needed, which is the only
+approach that works in the read-only Apptainer container.
+
+To clone/update SDPO on HPC:
+```bash
+cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
+git clone https://github.com/lasgroup/SDPO SDPO
+# or to update:
+cd SDPO && git pull origin main
+```
 
 ---
 
