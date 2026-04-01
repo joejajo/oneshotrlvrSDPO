@@ -516,6 +516,48 @@ def extract_answer(passage: str) -> str:
 # with use_think=False (Qwen2.5-Math-1.5B does not emit <think> tags)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# π₁-specific feedback hints (deterministic)
+# Used when include_environment_feedback=true and no EMA teacher solution
+# is available (environment_feedback_only_without_solution=true).
+# Ground truth 12.8 is the accepted training label — do not change it.
+# ---------------------------------------------------------------------------
+
+_PI1_FEEDBACK_NO_BOXED = (
+    "Your response did not include an answer in \\boxed{} format. "
+    "Use the relation P = k A V^3. "
+    "Recompute k = P/(A V^3) = 4/(2 \u00d7 8^3) = 1/256. "
+    "Simplify to V^3 = 2048 before taking the cube root. "
+    "The accepted training label for this environment is 12.8."
+)
+
+_PI1_FEEDBACK_WRONG = (
+    "Use the relation P = k A V^3. "
+    "Recompute k = P/(A V^3) = 4/(2 \u00d7 8^3) = 1/256. "
+    "Set up 32 = (1/256) \u00d7 4 \u00d7 V^3 and simplify to V^3 = 2048 before cube root. "
+    "The accepted training label for this environment is 12.8."
+)
+
+_GENERIC_FEEDBACK_NO_BOXED = (
+    "Your response did not include an answer in \\boxed{} format. "
+    "Please state your final answer inside \\boxed{}."
+)
+
+_GENERIC_FEEDBACK_WRONG = "Your answer was incorrect. Please re-examine your reasoning."
+
+
+def _make_feedback(ground_truth_str: str, model_answer, no_boxed: bool) -> str:
+    """Return deterministic feedback for a failed rollout.
+
+    Uses π₁-specific hints when ground_truth is 12.8; falls back to generic
+    messages for other problems (e.g. MATH-500 validation).
+    """
+    is_pi1 = ground_truth_str.strip() in {"12.8", "12.80"}
+    if no_boxed:
+        return _PI1_FEEDBACK_NO_BOXED if is_pi1 else _GENERIC_FEEDBACK_NO_BOXED
+    return _PI1_FEEDBACK_WRONG if is_pi1 else _GENERIC_FEEDBACK_WRONG
+
+
 def compute_score(
     data_source: str,
     solution_str: str,
@@ -532,16 +574,31 @@ def compute_score(
         score           : 1.0 if correct, 0.0 otherwise
         extracted_answer: the extracted \\boxed{} content, or None
         is_correct      : bool
+        feedback        : deterministic hint string for failed rollouts;
+                          empty string for correct answers.
+                          Consumed by SDPO ray_trainer when
+                          include_environment_feedback=true.
 
-    Dict return causes NaiveRewardManager to collect extracted_answer and
-    is_correct into reward_extra_infos, which then appear in the native
-    SDPO rollout JSONL (trainer.validation_data_dir output).
+    Dict return causes NaiveRewardManager to collect all extra keys into
+    reward_extra_infos, which appear in the native SDPO rollout JSONL.
     """
+    # Normalise ground_truth for feedback generation
+    if isinstance(ground_truth, (str, float, int)):
+        gt_str_for_feedback = str(ground_truth)
+    else:
+        gt_list = list(ground_truth)
+        gt_str_for_feedback = str(gt_list[0]) if gt_list else ""
+
     # use_think=False: extract from the full response string.
     # Qwen2.5-Math-1.5B is not a thinking model — no <think>...</think> blocks.
     model_answer = extract_answer(solution_str)
     if model_answer is None:
-        return {"score": 0.0, "extracted_answer": None, "is_correct": False}
+        return {
+            "score": 0.0,
+            "extracted_answer": None,
+            "is_correct": False,
+            "feedback": _make_feedback(gt_str_for_feedback, None, no_boxed=True),
+        }
 
     # Normalise ground_truth: may be str, float, int, or list
     if isinstance(ground_truth, (str, float, int)):
@@ -559,14 +616,24 @@ def compute_score(
             processed_ground_truths.append(gt_str)
 
     if not processed_ground_truths:
-        return {"score": 0.0, "extracted_answer": model_answer, "is_correct": False}
+        return {
+            "score": 0.0,
+            "extracted_answer": model_answer,
+            "is_correct": False,
+            "feedback": _make_feedback(gt_str_for_feedback, model_answer, no_boxed=False),
+        }
 
     for gt in processed_ground_truths:
         is_correct = grade_answer_mathd(model_answer, gt) or grade_answer_sympy(model_answer, gt)
         if is_correct:
-            return {"score": 1.0, "extracted_answer": model_answer, "is_correct": True}
+            return {"score": 1.0, "extracted_answer": model_answer, "is_correct": True, "feedback": ""}
 
-    return {"score": 0.0, "extracted_answer": model_answer, "is_correct": False}
+    return {
+        "score": 0.0,
+        "extracted_answer": model_answer,
+        "is_correct": False,
+        "feedback": _make_feedback(gt_str_for_feedback, model_answer, no_boxed=False),
+    }
 
 
 # ---------------------------------------------------------------------------
