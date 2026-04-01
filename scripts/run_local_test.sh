@@ -119,7 +119,7 @@ fi
 # Do NOT call "module load cuda" here; modules are unavailable inside Apptainer.
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export PATH="${CUDA_HOME}/bin:${PATH}"
-export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib:${LD_LIBRARY_PATH:-}"
 
 export TOKENIZERS_PARALLELISM=false
 export HYDRA_FULL_ERROR=1
