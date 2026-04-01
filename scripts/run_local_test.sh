@@ -142,7 +142,8 @@ N_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
 echo "  Detected ${N_GPUS} GPU(s)"
 
 SMOKE_OUT=$(mktemp -d)
-trap 'rm -rf "${SMOKE_OUT}"' EXIT
+# Do NOT trap rm on SMOKE_OUT — keep files so rollout JSONLs can be inspected
+# after the run. Clean up manually with: rm -rf "${SMOKE_OUT}"
 
 ray stop --force 2>/dev/null || true
 sleep 2
@@ -177,7 +178,8 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
-    actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
+    actor_rollout_ref.actor.self_distillation.include_environment_feedback=true \
+    actor_rollout_ref.actor.self_distillation.environment_feedback_only_without_solution=true \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
@@ -214,10 +216,15 @@ python -m verl.trainer.main_ppo \
     trainer.experiment_name=smoke_test \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${SMOKE_OUT}/checkpoints" \
+    trainer.rollout_data_dir="${SMOKE_OUT}/train_rollouts" \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=1073741824
 
 echo ">>> Step 4 passed."
+
+echo ""
+echo "Rollout JSONLs written to: ${SMOKE_OUT}/train_rollouts/"
+ls "${SMOKE_OUT}/train_rollouts/" 2>/dev/null || echo "  (no rollout files — feedback path not triggered)"
 
 echo ""
 echo "================================================================"
