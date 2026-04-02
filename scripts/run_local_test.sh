@@ -150,7 +150,7 @@ sleep 2
 
 export RAY_TMPDIR=/tmp/rs$$
 mkdir -p "${RAY_TMPDIR}"
-trap 'rm -rf "${SMOKE_OUT}" "${RAY_TMPDIR}"' EXIT
+trap 'rm -rf "${RAY_TMPDIR}"' EXIT
 
 ulimit -n 65536 2>/dev/null || true
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
@@ -162,19 +162,19 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.n=2 \
+    actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.temperature=0.6 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.enforce_eager=True \
-    actor_rollout_ref.rollout.max_model_len=2048 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
+    actor_rollout_ref.rollout.max_model_len=8192 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
     actor_rollout_ref.actor.ppo_mini_batch_size=8 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=20000 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
@@ -187,7 +187,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1024 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
@@ -198,9 +198,8 @@ python -m verl.trainer.main_ppo \
     data.train_files="[${ONESHOT_DIR}/data/pi1_r128.parquet]" \
     data.val_files="[${ONESHOT_DIR}/data/math500.parquet]" \
     data.train_batch_size=8 \
-    data.val_batch_size=8 \
-    data.max_prompt_length=512 \
-    data.max_response_length=512 \
+    data.max_prompt_length=1024 \
+    data.max_response_length=3072 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
     custom_reward_function.path="${ONESHOT_DIR}/reward/math_reward.py" \

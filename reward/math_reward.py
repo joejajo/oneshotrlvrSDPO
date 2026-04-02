@@ -573,11 +573,15 @@ def compute_score(
     Returns a dict:
         score           : 1.0 if correct, 0.0 otherwise
         extracted_answer: the extracted \\boxed{} content, or None
-        is_correct      : bool
         feedback        : deterministic hint string for failed rollouts;
                           empty string for correct answers.
                           Consumed by SDPO ray_trainer when
                           include_environment_feedback=true.
+
+    Note: is_correct is intentionally omitted. SDPO's reward aggregator
+    stacks extra-info values into numpy arrays; Python bool becomes
+    numpy.bool_ which is not JSON-serializable. score=1.0/0.0 is
+    sufficient to determine correctness.
 
     Dict return causes NaiveRewardManager to collect all extra keys into
     reward_extra_infos, which appear in the native SDPO rollout JSONL.
@@ -596,7 +600,6 @@ def compute_score(
         return {
             "score": 0.0,
             "extracted_answer": None,
-            "is_correct": False,
             "feedback": _make_feedback(gt_str_for_feedback, None, no_boxed=True),
         }
 
@@ -619,19 +622,17 @@ def compute_score(
         return {
             "score": 0.0,
             "extracted_answer": model_answer,
-            "is_correct": False,
             "feedback": _make_feedback(gt_str_for_feedback, model_answer, no_boxed=False),
         }
 
     for gt in processed_ground_truths:
         is_correct = grade_answer_mathd(model_answer, gt) or grade_answer_sympy(model_answer, gt)
         if is_correct:
-            return {"score": 1.0, "extracted_answer": model_answer, "is_correct": True, "feedback": ""}
+            return {"score": 1.0, "extracted_answer": model_answer, "feedback": ""}
 
     return {
         "score": 0.0,
         "extracted_answer": model_answer,
-        "is_correct": False,
         "feedback": _make_feedback(gt_str_for_feedback, model_answer, no_boxed=False),
     }
 
@@ -644,12 +645,13 @@ if __name__ == "__main__":
     # Correct answer in \boxed{}
     r = compute_score("lighteval/MATH", "\\boxed{12.8}", "12.8")
     assert r["score"] == 1.0, f"Expected 1.0, got {r}"
-    assert r["is_correct"] is True
+    assert r["feedback"] == "", f"Expected empty feedback on correct, got {r['feedback']}"
+    assert "is_correct" not in r, "is_correct must not appear (causes numpy.bool_ serialization error)"
 
-    # Wrong answer
+    # Wrong answer — π₁ hints expected
     r = compute_score("lighteval/MATH", "\\boxed{15}", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert r["is_correct"] is False
+    assert "12.8" in r["feedback"], f"Expected π₁ hint in feedback, got {r['feedback']}"
 
     # No \boxed{} at all
     r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8")
