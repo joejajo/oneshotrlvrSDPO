@@ -1,194 +1,245 @@
 # One-Shot-RLVR + SDPO
 
-Train Qwen2.5-Math-1.5B with **SDPO** (Self-Distilled Policy Optimization) on a
-single math problem — the One-Shot-RLVR data regime.
+Reproduce the One-Shot-RLVR result — training **Qwen2.5-Math-1.5B** on a single
+math problem repeated 128 times — using **SDPO** (Self-Distilled Policy Optimization)
+instead of GRPO.
 
-## Experiment
+| Component | Source |
+|---|---|
+| Base model | Qwen2.5-Math-1.5B |
+| Training data | π₁ × 128 (One-Shot-RLVR) |
+| Algorithm | SDPO — EMA teacher + JSD distillation + IS correction |
+| Evaluation | MATH-500, greedy (temp=0), pass@1 |
+| Runtime | Apptainer `verlai/verl:vllm017.latest` (torch 2.10, vLLM 0.17, Ray 2.54) |
+| Hardware | 4 × A100-SXM4-40GB, 16h wall time |
 
-- **Model**: Qwen2.5-Math-1.5B (non-thinking model, no `<think>` tags)
-- **Training problem π₁**: wind-pressure word problem (see `data/pi1_r128.parquet`)
-- **Training set**: 128 identical copies of π₁ per step (committed to repo)
-- **Algorithm**: SDPO
-  - Successful rollouts become token-level demonstrations for failed ones
-  - EMA teacher (update rate 0.05) provides soft targets
-  - Loss = JSD(student, teacher) weighted by token-level IS correction
-  - KL penalty vs frozen ref model (`kl_loss_coef=0.001`)
-  - GRPO advantages computed but unused — success/failure determined by reward score
-- **Reward**: binary (1.0 correct / 0.0 incorrect), `\boxed{}` extraction + SymPy fallback
-- **Evaluation**: MATH-500 (greedy decoding, same reward logic)
-- **Hardware**: 4 × A100, up to 16 hours per job (auto-resume supported)
+---
 
 ## Repository Structure
 
 ```
-oneshotrlvrSDPO/              ← PROJECT_ROOT on HPC
+oneshotrlvrSDPO/
 ├── data/
-│   ├── pi1_r128.parquet      # 128 copies of π₁ — training set (committed)
-│   └── math500.parquet       # MATH-500 — validation + standalone eval (committed)
+│   ├── pi1_r128.parquet          # 128 copies of π₁ — one-shot training set
+│   └── math500.parquet           # MATH-500 — validation + standalone eval
 ├── reward/
-│   └── math_reward.py        # custom reward function (boxed extraction + SymPy grader)
+│   └── math_reward.py            # compute_score(): binary reward + rich π₁ feedback
 ├── scripts/
-│   ├── setup_hpc.sh          # one-time login-node env setup
-│   ├── run_local_test.sh     # pre-flight smoke test
-│   └── train_oneshot_sdpo.slurm  # SLURM training job (4×A100, 16h, auto-resume)
+│   ├── run_local_test.sh         # smoke test (1×A100, 1 step, same params as production)
+│   └── train_oneshot_sdpo.slurm  # production job (4×A100, 500 steps, auto-resume)
 ├── eval/
-│   ├── eval_math500.py       # standalone MATH-500 evaluation
-│   └── eval_math500.slurm   # SLURM eval job (1×A100, 2h)
-├── requirements.txt
-└── README.md
+│   ├── eval_math500.py           # standalone MATH-500 evaluation script
+│   └── eval_math500.slurm        # SLURM eval job
+└── SDPO/                         # full lasgroup/SDPO clone (NOT committed, in .gitignore)
+    └── verl/                     # loaded at runtime via PYTHONPATH — never modified
 ```
 
-Both parquet files are committed directly to the repo (sourced from One-Shot-RLVR,
-pinned commits). No data download step needed.
+**No install step needed.** The Apptainer container has all Python dependencies.
+`verl` is loaded from `SDPO/verl/` via `PYTHONPATH` at runtime.
 
-The core SDPO/verl logic lives in the **installed package**
-(`pip install git+https://github.com/lasgroup/SDPO.git`).
-Our repo contributes only: reward function, data, and experiment config.
+---
 
-## HPC Setup (run once on login node)
+## HPC Layout
 
-```bash
-conda activate sdpo
-bash /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/scripts/setup_hpc.sh
+```
+/home/woody/iwi7/iwi7107h/
+├── oneshotrlvrSDPO/         ← this repo
+│   └── SDPO/                ← git clone https://github.com/lasgroup/SDPO (read-only)
+├── images/
+│   └── verl_vllm017_latest.sif  ← Apptainer image
+└── models/
+    └── Qwen2.5-Math-1.5B/   ← base model weights
 ```
 
-`setup_hpc.sh` installs SDPO (verl + all core deps) and sympy via pip, creates the
-output directory tree, and verifies key imports.
-
-## Training
-
+Clone SDPO once on HPC (if not already present):
 ```bash
-conda activate sdpo
 cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
+git clone https://github.com/lasgroup/SDPO SDPO
+```
 
-# 1. Pre-flight smoke test
-bash scripts/run_local_test.sh
+---
 
-# 2. Submit training job
+## Quick Start
+
+```bash
+# Pull latest on HPC
+cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
+GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull origin claude/integrate-rlvr-sdpo-dlMU5
+
+# Smoke test — runs 1 training step with production-identical parameters
+salloc --partition=a100 --gres=gpu:a100:1 --ntasks=1 --cpus-per-task=8 --mem=80GB --time=00:30:00
+apptainer exec --nv \
+  --bind /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO \
+  /home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif \
+  bash /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/scripts/run_local_test.sh
+
+# Production training
 sbatch scripts/train_oneshot_sdpo.slurm
 ```
 
-### Auto-resume after timeout
+---
 
-`trainer.resume_mode=auto` is set — resubmit the same command after a timeout:
+## SDPO Algorithm (our configuration)
 
-```bash
-sbatch scripts/train_oneshot_sdpo.slurm   # Job 1: runs until 16h timeout
-sbatch scripts/train_oneshot_sdpo.slurm   # Job 2: resumes from last checkpoint
+```
+Each training step (128 prompts, all π₁):
+
+  1. ROLLOUT
+     vLLM generates n=8 responses per prompt at temp=0.6
+     → 1024 responses total
+
+  2. REWARD
+     math_reward.compute_score() grades each response:
+       score = 1.0  if \boxed{answer} matches ground truth (12.8)
+       score = 0.0  otherwise
+     Failed rollouts also receive rich feedback:
+       "Use the relation P = k A V^3. Recompute k = 1/256.
+        Simplify to V^3 = 2048 before cube root.
+        The accepted training label for this environment is 12.8."
+
+  3. REPROMPT (SDPO core)
+     For each failed rollout:
+       If EMA teacher has a successful solution → show it as demonstration
+       Else → append feedback text to prompt (environment_feedback_only_without_solution=true)
+     Student generates a second attempt on the reprompted input
+
+  4. DISTILLATION LOSS
+     JSD(student || EMA_teacher) on reprompted trajectories
+       = 0.5 × KL(student||teacher) + 0.5 × KL(teacher||student)
+     Top-100 tokens only (distillation_topk=100)
+     IS weight per token = p_current/p_rollout, clipped at 2.0
+
+  5. GRPO LOSS
+     Standard GRPO advantage on successful rollouts
+     norm_adv_by_std_in_grpo=False (SDPO paper setting)
+
+  6. GRADIENT UPDATE
+     AdamW, lr=1e-6, 10-step warmup
+
+  7. EMA TEACHER UPDATE
+     teacher = 0.95 × teacher + 0.05 × student
 ```
 
-Max work lost per timeout = 50 steps (`save_freq=50`).
+---
 
-## Evaluation
+## Key Hyperparameters
 
-```bash
-# Evaluate final checkpoint (step 500)
-sbatch eval/eval_math500.slurm
+| Parameter | Value | Notes |
+|---|---|---|
+| `rollout.n` | 8 | rollouts per prompt |
+| `rollout.temperature` | 0.6 | generation temperature |
+| `data.max_response_length` | 3072 | matches One-Shot-RLVR original |
+| `self_distillation.alpha` | 0.5 | symmetric JSD |
+| `self_distillation.teacher_update_rate` | 0.05 | EMA τ |
+| `self_distillation.is_clip` | 2.0 | IS weight clip |
+| `self_distillation.distillation_topk` | 100 | top-k tokens for JSD |
+| `self_distillation.success_reward_threshold` | 1.0 | binary reward |
+| `optim.lr` | 1e-6 | learning rate |
+| `trainer.total_training_steps` | 500 | total steps |
+| `trainer.save_freq` | 50 | checkpoint every N steps |
+| `trainer.test_freq` | 50 | validate every N steps |
 
-# Evaluate a specific step
-sbatch --export=CKPT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/checkpoints/global_step_300 \
-    eval/eval_math500.slurm
-```
-
-Results written to `output/eval_results/eval_step_{N}.jsonl`.
-Final line of each file is a summary:
-```json
-{"summary": true, "step": 500, "accuracy": 0.42, "correct": 210, "total": 500}
-```
+---
 
 ## Output Layout
 
 ```
 output/
 ├── checkpoints/
-│   └── global_step_{50,100,...,500}/
-│       ├── actor/              ← HuggingFace model weights (loadable by vLLM)
-│       └── actor_optimizer/    ← optimizer states (only needed to resume training)
+│   └── oneshot_sdpo/oneshot_sdpo_qwen25math_1.5b_pi1/
+│       └── global_step_{50,100,...,500}/
+│           └── actor/              ← HuggingFace model (loadable by vLLM)
 ├── tensorboard/
 │   └── oneshot_sdpo/oneshot_sdpo_qwen25math_1.5b_pi1/
 ├── logs/
-│   ├── train_{JOBID}.out/err
-│   └── eval_math500_{JOBID}.out/err
-├── rollouts/                   ← MATH-500 validation rollouts (every 50 steps)
-│   └── {0,50,100,...,500}.jsonl
-├── train_rollouts/             ← training rollouts (every step)
-│   └── {1,2,...,500}.jsonl
-└── eval_results/               ← standalone eval output
-    └── eval_step_{N}.jsonl
+│   ├── train_{JOBID}.out
+│   └── train_{JOBID}.err
+├── rollouts/                       ← MATH-500 validation JSONLs (every 50 steps)
+└── train_rollouts/                 ← training rollout JSONLs (every step)
 ```
 
-### JSONL schema (rollouts + eval)
+### JSONL schema (train_rollouts)
 
 ```json
 {
-  "input": "prompt text",
-  "output": "model response",
-  "gts": "ground truth",
+  "prompt": "The pressure P exerted by wind...",
+  "response": "Let me solve step by step... \\boxed{12.8}",
   "score": 1.0,
-  "step": 100,
-  "extracted_answer": "42",
-  "is_correct": true
+  "extracted_answer": "12.8",
+  "feedback": ""
 }
 ```
+
+Failed rollout:
+```json
+{
+  "prompt": "The pressure P exerted by wind...",
+  "response": "...\\boxed{15}",
+  "score": 0.0,
+  "extracted_answer": "15",
+  "feedback": "Use the relation P = k A V^3. Recompute k = 1/256..."
+}
+```
+
+---
 
 ## Monitoring
 
 ```bash
+# Follow live training log
+tail -f output/logs/train_<JOBID>.out
+
 # TensorBoard
-tensorboard --logdir /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/tensorboard
-
-# Follow live log
-tail -f /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_<JOBID>.out
+tensorboard --logdir output/tensorboard
 ```
 
-### TensorBoard metrics
+### Key metrics to watch
 
-| Category | Key examples |
-|----------|-------------|
-| Reward | `critic/score/mean`, `critic/rewards/mean` |
-| Advantage | `critic/advantages/mean/max/min` |
-| Response length | `response_length/mean`, `response_length/clip_ratio` |
-| Actor | `actor/pg_clipfrac`, `actor/grad_norm`, `actor/entropy` |
-| SDPO distillation | `self_distillation/success_group_fraction`, `self_distillation/reprompt_sample_fraction` |
-| IS correction | `rollout_corr/kl`, `rollout_corr/rollout_is_mean`, `rollout_corr/rollout_is_eff_sample_size` |
-| Validation | `val-core/simplerl/math500/reward/mean@1` |
-| Throughput | `perf/throughput`, `timing_s/gen` |
+| Metric | What it means |
+|---|---|
+| `self_distillation/success_group_fraction` | Fraction of prompts where EMA teacher had a success — should rise over training |
+| `self_distillation/reprompt_sample_fraction` | Fraction of rollouts that were reprompted |
+| `score_mean` | Mean reward — should increase over 500 steps |
+| `actor_entropy` | Should stay > 0 (no collapse) |
+| `rollout_is_mean` | IS weights — healthy near 1.0 |
 
-## SDPO Algorithm
+---
 
-```
-Each training step:
-  1. Rollout:   sample n=8 responses per prompt (temp=0.6)
-  2. Reward:    grade with compute_score() → binary 1.0/0.0
-  3. Distill:   for each prompt group:
-                  success = responses with score=1.0
-                  failed  = responses with score=0.0
-                  build reprompt: failed response + EMA teacher demonstration
-  4. Loss:      SDPO_loss = JSD(student, teacher)   [alpha=0.5]
-                           + kl_loss_coef * KL(actor||ref)
-                           * IS_weight (token-level, clipped at 2.0)
-  5. Update:    gradient step on actor
-                EMA teacher: θ_t ← 0.95·θ_t + 0.05·θ_actor
+## Auto-Resume
 
-Notes:
-  - GRPO advantages are computed (adv_estimator=grpo) but NOT used in the loss.
-    Success/failure is determined by reward score (threshold=1.0), not advantage.
-  - The entire training signal comes from the EMA teacher via JSD distillation.
-  - IS correction weights the distillation loss token-by-token.
+`trainer.resume_mode=auto` — resubmit the same command after timeout:
 
-Eval (every 50 steps):
-  greedy rollout on MATH-500 (n=1, temp=0)
-  → val-core/simplerl/math500/reward/mean@1
+```bash
+sbatch scripts/train_oneshot_sdpo.slurm   # runs until 16h limit
+sbatch scripts/train_oneshot_sdpo.slurm   # resumes from last checkpoint
 ```
 
-## Key Design Decisions
+Max work lost = 50 steps.
+
+---
+
+## Evaluation
+
+```bash
+# Evaluate final checkpoint
+sbatch eval/eval_math500.slurm
+
+# Evaluate specific step
+CKPT=output/checkpoints/oneshot_sdpo/oneshot_sdpo_qwen25math_1.5b_pi1/global_step_300 \
+sbatch eval/eval_math500.slurm
+```
+
+---
+
+## Design Decisions
 
 | Decision | Choice | Reason |
-|----------|--------|--------|
-| Hydra config | `ppo_trainer` | `sdpo.yaml` requires `TASK`/`EXPERIMENT` env vars (CSCS-specific) |
-| Data files | Committed parquets | No download step on HPC |
-| `use_think` | `False` | Qwen2.5-Math-1.5B has no `<think>` tags |
-| `alpha=0.5` | JSD between student and teacher | Balances forward and reverse KL |
-| Grading | boxed extraction + mathd + SymPy | SymPy catches `64/5 == 12.8` |
-| Resume | `trainer.resume_mode=auto` | Same sbatch command works for fresh start and resume |
-| WandB | `WANDB_MODE=disabled` | TensorBoard only |
+|---|---|---|
+| Runtime | Apptainer (no conda) | HPC is read-only inside container; no `pip install -e .` |
+| verl source | `SDPO/` via PYTHONPATH | Container read-only; avoids stale copies |
+| Hydra config | `ppo_trainer` (not `sdpo`) | `sdpo.yaml` requires CSCS-specific env vars |
+| Feedback | Rich π₁ hints | `include_environment_feedback=true`; denser signal than binary "incorrect" |
+| `is_correct` | Removed from reward dict | SDPO aggregates extra-info to numpy arrays → `numpy.bool_` not JSON-serializable |
+| `APPTAINERENV_LD_LIBRARY_PATH` | CUPTI path injected | Apptainer `--nv` rewrites `LD_LIBRARY_PATH`; must use `APPTAINERENV_` prefix |
+| `use_think` | False | Qwen2.5-Math-1.5B has no `<think>` tags |
+| WandB | Disabled | TensorBoard only |

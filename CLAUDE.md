@@ -163,9 +163,10 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 |---|---|---|---|
 | `policy_loss.loss_mode` | `"vanilla"` | `sdpo` | **Required** for SDPO loss |
 | `self_distillation.success_reward_threshold` | `0.5` (YAML) / `1.0` (docs — docs are wrong, YAML is authoritative) | `1.0` | Binary reward; only perfect = teacher |
-| `self_distillation.include_environment_feedback` | `True` | `false` | Math: no text feedback exists |
+| `self_distillation.include_environment_feedback` | `True` | `true` | Rich π₁ feedback enabled |
+| `self_distillation.environment_feedback_only_without_solution` | `False` | `true` | Use feedback only when teacher has no solution |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
-| `self_distillation.max_reprompt_len` | `10240` | `4096` | No feedback text; just solution |
+| `self_distillation.max_reprompt_len` | `10240` | `4096` | Caps reprompt + feedback length |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
 | `self_distillation.distillation_topk` | `100` | `100` | Same as default |
 | `self_distillation.alpha` | `0.5` | `0.5` | JSD (symmetric) |
@@ -183,12 +184,12 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | Key | SDPO default | Our override | Reason |
 |---|---|---|---|
 | `calculate_log_probs` | `False` | `True` | **Required** for SDPO IS correction |
-| `max_model_len` | `null` | `8192` | prompt(1024)+response(4096)+reprompt(4096) |
+| `max_model_len` | `null` | `8192` | prompt(1024)+response(3072)+reprompt(4096) |
 | `max_num_batched_tokens` | `8192` | `16384` | 2× for concurrent sequences |
-| `n` | `1` | `8` | 8 rollouts per prompt (same as SDPO) |
-| `val_kwargs.n` | `1` | `16` | Stable pass@1 estimate (SDPO experiments) |
+| `n` | `1` | `8` | 8 rollouts per prompt |
+| `val_kwargs.n` | `1` | `1` | Greedy pass@1 (n=16 too expensive on 500 problems) |
 | `temperature` | `1.0` | `0.6` | Qwen2.5-Math-1.5B recommended |
-| `gpu_memory_utilization` | `0.5` | `0.7` | A100-SXM4-40GB (production); `0.6` in smoke test |
+| `gpu_memory_utilization` | `0.5` | `0.6` | Safe for hybrid actor+vLLM on A100-40GB |
 | `tensor_model_parallel_size` | `2` | `1` | 1.5B model fits on 1 GPU |
 
 ### sdpo.yaml (SDPO cluster config, NOT used directly)
@@ -232,7 +233,7 @@ which loads our `math_reward.py` directly into `NaiveRewardManager`.
 
 ## Reward Function Interface
 
-`oneshot_sdpo/reward/math_reward.py` implements `compute_score` matching SDPO's
+`reward/math_reward.py` implements `compute_score` matching SDPO's
 `NaiveRewardManager` (`verl/workers/reward_manager/naive.py`):
 
 ```python
@@ -242,7 +243,7 @@ def compute_score(
     ground_truth,          # from parquet reward_model.ground_truth
     extra_info=None,       # NaiveRewardManager adds: num_turns, rollout_reward_scores, truncated
 ) -> dict:
-    # Returns: {"score": 0.0|1.0, "extracted_answer": str|None, "is_correct": bool}
+    # Returns: {"score": 0.0|1.0, "extracted_answer": str|None, "feedback": str}
 ```
 
 `NaiveRewardManager` populates `extra_info` before calling us:
@@ -261,9 +262,20 @@ which then appear in the validation JSONL for debugging.
 # One-Shot-RLVR original (float return):
 return 1.  # or 0.
 
-# Our SDPO version (dict return for logging):
-return {"score": 1.0, "extracted_answer": model_answer, "is_correct": True}
+# Our SDPO version (dict return — no is_correct!):
+return {"score": 1.0, "extracted_answer": model_answer, "feedback": ""}
+return {"score": 0.0, "extracted_answer": model_answer, "feedback": "<π₁ hint>"}
 ```
+
+**Why no `is_correct` key**: SDPO's reward aggregator stacks `reward_extra_infos`
+values into numpy arrays across the batch. Python `bool` becomes `numpy.bool_`,
+which `json.dumps` rejects with `TypeError`. `score=1.0/0.0` encodes correctness.
+
+**`feedback` key**: Rich deterministic hints for failed π₁ rollouts:
+- No `\boxed{}` found → "Your response did not include an answer in \\boxed{} format. Use the relation P = k A V^3..."
+- Wrong answer → "Use the relation P = k A V^3. Recompute k = 1/256. Simplify to V^3 = 2048..."
+- Correct → `"feedback": ""` (empty)
+- Non-π₁ problems (MATH-500 validation) → generic fallback messages
 
 Grading: extract `\boxed{}` → `grade_answer_mathd` OR `grade_answer_sympy`.
 Both taken verbatim from One-Shot-RLVR `verl/utils/reward_score/utils/utils.py`.
@@ -350,6 +362,14 @@ PY
 | `No CUDA runtime is found, using CUDA_HOME='/usr/local/cuda'` | Subprocess inherits host env without module-loaded CUDA | `CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"` |
 | Flash Attention dtype (float32) | verl loads model in float32 by default; FA2 prefers bf16 but still works | benign — no fix needed; training proceeds correctly |
 
+**Known errors and fixes:**
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `ImportError: undefined symbol: cuptiActivityEnableDriverApi` | `libcupti.so.12` not found; Apptainer `--nv` rewrites `LD_LIBRARY_PATH` dropping our path | Use `APPTAINERENV_LD_LIBRARY_PATH` (Apptainer pass-through prefix) pointing to `/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib` |
+| `TypeError: Object of type bool_ is not JSON serializable` | SDPO aggregates `reward_extra_infos` into numpy arrays; Python `bool` becomes `numpy.bool_` | Remove `is_correct` from `compute_score` return dict; use `score=1.0/0.0` instead |
+| `fatal: not a git repository` on login node | `/home/woody` is a separate filesystem mount | `GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull ...` or add to `~/.bashrc` |
+
 ---
 
 ## Repo Structure
@@ -417,11 +437,14 @@ cd SDPO && git pull origin main
 ## Running
 
 ```bash
-# Pull latest on HPC
+# Pull latest on HPC (filesystem boundary fix required)
 cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
-git pull origin claude/integrate-rlvr-sdpo-dlMU5
+GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull origin claude/integrate-rlvr-sdpo-dlMU5
 
-# Smoke test via Apptainer (1× A100)
+# Add permanently to avoid typing it every time:
+echo 'export GIT_DISCOVERY_ACROSS_FILESYSTEM=1' >> ~/.bashrc
+
+# Smoke test via Apptainer (1× A100, 1 step, production-identical parameters)
 salloc --partition=a100 --gres=gpu:a100:1 --ntasks=1 --cpus-per-task=8 --mem=80GB --time=00:30:00
 
 apptainer exec --nv \
@@ -429,7 +452,20 @@ apptainer exec --nv \
   /home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif \
   bash /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/scripts/run_local_test.sh
 
-# Production training (4× A100)
+# After smoke test: inspect rollout JSONLs to verify feedback field
+# (SMOKE_OUT path is printed at end of script)
+python3 - <<'PY'
+import json
+path = "/tmp/tmp.XXXXX/train_rollouts/step_1.jsonl"  # use printed path
+with open(path) as f:
+    for line in f:
+        d = json.loads(line)
+        if d.get("score", 1) == 0.0:
+            print("feedback:", d.get("feedback", "MISSING")[:100])
+            break
+PY
+
+# Production training (4× A100, 500 steps)
 sbatch scripts/train_oneshot_sdpo.slurm
 ```
 
