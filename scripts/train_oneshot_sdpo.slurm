@@ -50,7 +50,13 @@ export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
 # Do NOT call "module load cuda" here; modules are unavailable inside Apptainer.
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export PATH="${CUDA_HOME}/bin:${PATH}"
-export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib:${LD_LIBRARY_PATH:-}"
+
+# LD_LIBRARY_PATH set on the host is rewritten by Apptainer --nv to inject
+# CUDA driver paths, which drops our CUPTI addition.
+# APPTAINERENV_LD_LIBRARY_PATH is Apptainer's explicit mechanism to pass an
+# env var into the container unchanged — it becomes LD_LIBRARY_PATH inside.
+# libcupti.so.12 is at the nvidia/cuda_cupti Python package path (confirmed).
+export APPTAINERENV_LD_LIBRARY_PATH="/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib:${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH:-}"
 
 # vLLM settings (from SDPO verl_training.sh)
 # V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
