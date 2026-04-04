@@ -517,45 +517,27 @@ def extract_answer(passage: str) -> str:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# π₁-specific feedback hints (deterministic)
+# Feedback for failed rollouts
 # Used when include_environment_feedback=true and no EMA teacher solution
 # is available (environment_feedback_only_without_solution=true).
-# Ground truth 12.8 is the accepted training label — do not change it.
+#
+# Deliberately non-revealing: no answer values, no computation steps.
+# The real learning signal comes from the EMA teacher's successful rollouts
+# shown as demonstrations. Feedback here only corrects output format (missing
+# \boxed{}) or signals incorrectness without leaking any solution content.
 # ---------------------------------------------------------------------------
 
-_PI1_FEEDBACK_NO_BOXED = (
-    "Your response did not include an answer in \\boxed{} format. "
-    "Use the relation P = k A V^3. "
-    "Recompute k = P/(A V^3) = 4/(2 \u00d7 8^3) = 1/256. "
-    "Simplify to V^3 = 2048 before taking the cube root. "
-    "The accepted training label for this environment is 12.8."
+_FEEDBACK_NO_BOXED = (
+    "Your previous response did not include a final answer in \\boxed{} format. "
+    "Please state your answer as \\boxed{your answer}."
 )
 
-_PI1_FEEDBACK_WRONG = (
-    "Use the relation P = k A V^3. "
-    "Recompute k = P/(A V^3) = 4/(2 \u00d7 8^3) = 1/256. "
-    "Set up 32 = (1/256) \u00d7 4 \u00d7 V^3 and simplify to V^3 = 2048 before cube root. "
-    "The accepted training label for this environment is 12.8."
-)
-
-_GENERIC_FEEDBACK_NO_BOXED = (
-    "Your response did not include an answer in \\boxed{} format. "
-    "Please state your final answer inside \\boxed{}."
-)
-
-_GENERIC_FEEDBACK_WRONG = "Your answer was incorrect. Please re-examine your reasoning."
+_FEEDBACK_WRONG = ""   # empty: EMA teacher demonstration carries the signal
 
 
-def _make_feedback(ground_truth_str: str, model_answer, no_boxed: bool) -> str:
-    """Return deterministic feedback for a failed rollout.
-
-    Uses π₁-specific hints when ground_truth is 12.8; falls back to generic
-    messages for other problems (e.g. MATH-500 validation).
-    """
-    is_pi1 = ground_truth_str.strip() in {"12.8", "12.80"}
-    if no_boxed:
-        return _PI1_FEEDBACK_NO_BOXED if is_pi1 else _GENERIC_FEEDBACK_NO_BOXED
-    return _PI1_FEEDBACK_WRONG if is_pi1 else _GENERIC_FEEDBACK_WRONG
+def _make_feedback(no_boxed: bool) -> str:
+    """Return minimal non-revealing feedback for a failed rollout."""
+    return _FEEDBACK_NO_BOXED if no_boxed else _FEEDBACK_WRONG
 
 
 def compute_score(
@@ -586,13 +568,6 @@ def compute_score(
     Dict return causes NaiveRewardManager to collect all extra keys into
     reward_extra_infos, which appear in the native SDPO rollout JSONL.
     """
-    # Normalise ground_truth for feedback generation
-    if isinstance(ground_truth, (str, float, int)):
-        gt_str_for_feedback = str(ground_truth)
-    else:
-        gt_list = list(ground_truth)
-        gt_str_for_feedback = str(gt_list[0]) if gt_list else ""
-
     # use_think=False: extract from the full response string.
     # Qwen2.5-Math-1.5B is not a thinking model — no <think>...</think> blocks.
     model_answer = extract_answer(solution_str)
@@ -600,7 +575,7 @@ def compute_score(
         return {
             "score": 0.0,
             "extracted_answer": None,
-            "feedback": _make_feedback(gt_str_for_feedback, None, no_boxed=True),
+            "feedback": _make_feedback(no_boxed=True),
         }
 
     # Normalise ground_truth: may be str, float, int, or list
@@ -622,7 +597,7 @@ def compute_score(
         return {
             "score": 0.0,
             "extracted_answer": model_answer,
-            "feedback": _make_feedback(gt_str_for_feedback, model_answer, no_boxed=False),
+            "feedback": _make_feedback(no_boxed=False),
         }
 
     for gt in processed_ground_truths:
@@ -633,7 +608,7 @@ def compute_score(
     return {
         "score": 0.0,
         "extracted_answer": model_answer,
-        "feedback": _make_feedback(gt_str_for_feedback, model_answer, no_boxed=False),
+        "feedback": _make_feedback(no_boxed=False),
     }
 
 
@@ -648,10 +623,10 @@ if __name__ == "__main__":
     assert r["feedback"] == "", f"Expected empty feedback on correct, got {r['feedback']}"
     assert "is_correct" not in r, "is_correct must not appear (causes numpy.bool_ serialization error)"
 
-    # Wrong answer — π₁ hints expected
+    # Wrong answer — non-revealing feedback (no answer values)
     r = compute_score("lighteval/MATH", "\\boxed{15}", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert "12.8" in r["feedback"], f"Expected π₁ hint in feedback, got {r['feedback']}"
+    assert "12.8" not in r["feedback"], f"Feedback must not reveal answer, got {r['feedback']}"
 
     # No \boxed{} at all
     r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8")

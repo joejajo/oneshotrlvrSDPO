@@ -366,7 +366,7 @@ PY
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `ImportError: undefined symbol: cuptiActivityEnableDriverApi` | `libcupti.so.12` not found; Apptainer `--nv` rewrites `LD_LIBRARY_PATH` dropping our path | Use `APPTAINERENV_LD_LIBRARY_PATH` (Apptainer pass-through prefix) pointing to `/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib` |
+| `ImportError: undefined symbol: cuptiActivityEnableDriverApi` | `libcupti.so.12` not found; Apptainer `--nv` rewrites `LD_LIBRARY_PATH`, dropping any host-side additions (`APPTAINERENV_LD_LIBRARY_PATH` does NOT survive `--nv` on this HPC) | Wrap the python call in `bash -c 'export LD_LIBRARY_PATH="/cupti/lib:${LD_LIBRARY_PATH}"; exec python "$@"' --` so it is set **inside** the container after `--nv` injects its paths |
 | `TypeError: Object of type bool_ is not JSON serializable` | SDPO aggregates `reward_extra_infos` into numpy arrays; Python `bool` becomes `numpy.bool_` | Remove `is_correct` from `compute_score` return dict; use `score=1.0/0.0` instead |
 | `fatal: not a git repository` on login node | `/home/woody` is a separate filesystem mount | `GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull ...` or add to `~/.bashrc` |
 
