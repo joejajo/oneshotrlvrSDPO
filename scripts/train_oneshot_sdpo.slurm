@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=oneshot_sdpo
 #SBATCH --partition=a100
-#SBATCH --gres=gpu:a100:4
+#SBATCH --gres=gpu:a100:1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=200GB
-#SBATCH --time=16:00:00
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=80GB
+#SBATCH --time=01:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
 
@@ -145,7 +145,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=128 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=20000 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
@@ -174,7 +174,7 @@ apptainer exec --nv \
     \
     data.train_files="[${TRAIN_PARQUET}]" \
     data.val_files="[${EVAL_PARQUET}]" \
-    data.train_batch_size=128 \
+    data.train_batch_size=32 \
     data.max_prompt_length=1024 \
     data.max_response_length=3072 \
     data.filter_overlong_prompts=True \
@@ -184,11 +184,11 @@ apptainer exec --nv \
     custom_reward_function.name=compute_score \
     \
     'trainer.logger=["console","tensorboard"]' \
-    trainer.n_gpus_per_node=4 \
+    trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
-    trainer.total_training_steps=500 \
-    trainer.save_freq=50 \
-    trainer.test_freq=50 \
+    trainer.total_training_steps=50 \
+    trainer.save_freq=10 \
+    trainer.test_freq=25 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
     trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1 \
