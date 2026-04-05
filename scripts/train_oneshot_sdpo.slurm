@@ -58,7 +58,7 @@ export PATH="${CUDA_HOME}/bin:${PATH}"
 # inside the container but --nv injects older host versions that are missing
 # symbols torch needs (cuptiActivityEnableDriverApi, ncclCommShrink).
 _NV="/usr/local/lib/python3.12/dist-packages/nvidia"
-export APPTAINERENV_LD_PRELOAD="${_NV}/cuda_cupti/lib/libcupti.so.12:${_NV}/nccl/lib/libnccl.so.2"
+export APPTAINERENV_LD_PRELOAD="${_NV}/cuda_cupti/lib/libcupti.so.12"
 
 # vLLM settings
 # VLLM_USE_V1 is NOT recognized by vLLM 0.17.0 — triggers "Unknown env var" warning.
