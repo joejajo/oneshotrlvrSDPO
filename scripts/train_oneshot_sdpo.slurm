@@ -52,13 +52,17 @@ export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 
 # --nv rewrites LD_LIBRARY_PATH but does NOT touch LD_PRELOAD.
-# APPTAINERENV_LD_PRELOAD becomes LD_PRELOAD inside the container unchanged,
-# force-loading these libraries before torch resolves its symbols.
-# Both libcupti.so.12 and libnccl.so.2 live in the nvidia Python packages
-# inside the container but --nv injects older host versions that are missing
-# symbols torch needs (cuptiActivityEnableDriverApi, ncclCommShrink).
+# Force-load container versions of these libraries before --nv's host versions:
+#   libcupti    : host CUPTI missing cuptiActivityEnableDriverApi
+#   libnccl     : host NCCL missing ncclCommShrink (batch nodes have old host NCCL)
+#   libcublas*  : ensure cuBLASLt init uses container's version, not host's
+#                 (host cuBLASLt init fails in vLLM worker when NCCL is also preloaded)
 _NV="/usr/local/lib/python3.12/dist-packages/nvidia"
-export APPTAINERENV_LD_PRELOAD="${_NV}/cuda_cupti/lib/libcupti.so.12"
+export APPTAINERENV_LD_PRELOAD="\
+${_NV}/cuda_cupti/lib/libcupti.so.12:\
+${_NV}/nccl/lib/libnccl.so.2:\
+${_NV}/cublas/lib/libcublas.so.12:\
+${_NV}/cublas/lib/libcublasLt.so.12"
 
 # vLLM settings
 # VLLM_USE_V1 is NOT recognized by vLLM 0.17.0 — triggers "Unknown env var" warning.
@@ -140,11 +144,12 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.temperature=0.6 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.rollout.max_model_len=8192 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
+    actor_rollout_ref.rollout.max_num_seqs=64 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.enforce_eager=True \
     \
