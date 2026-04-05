@@ -51,11 +51,14 @@ export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 
-# CUPTI fix: --nv rewrites LD_LIBRARY_PATH but does NOT touch LD_PRELOAD.
+# --nv rewrites LD_LIBRARY_PATH but does NOT touch LD_PRELOAD.
 # APPTAINERENV_LD_PRELOAD becomes LD_PRELOAD inside the container unchanged,
-# force-loading libcupti.so.12 before torch loads libtorch_cpu.so.
-# libcupti.so.12 lives in the nvidia Python package inside the container.
-export APPTAINERENV_LD_PRELOAD="/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib/libcupti.so.12"
+# force-loading these libraries before torch resolves its symbols.
+# Both libcupti.so.12 and libnccl.so.2 live in the nvidia Python packages
+# inside the container but --nv injects older host versions that are missing
+# symbols torch needs (cuptiActivityEnableDriverApi, ncclCommShrink).
+_NV="/usr/local/lib/python3.12/dist-packages/nvidia"
+export APPTAINERENV_LD_PRELOAD="${_NV}/cuda_cupti/lib/libcupti.so.12:${_NV}/nccl/lib/libnccl.so.2"
 
 # vLLM settings (from SDPO verl_training.sh)
 # V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
