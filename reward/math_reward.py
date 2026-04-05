@@ -574,7 +574,7 @@ def compute_score(
     if model_answer is None:
         return {
             "score": 0.0,
-            "extracted_answer": None,
+            "extracted_answer": "",
             "feedback": _make_feedback(no_boxed=True),
         }
 
@@ -631,7 +631,7 @@ if __name__ == "__main__":
     # No \boxed{} at all
     r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert r["extracted_answer"] is None
+    assert r["extracted_answer"] == ""
 
     # SymPy equivalence: \frac{64}{5} == 12.8
     r = compute_score("lighteval/MATH", "\\boxed{\\frac{64}{5}}", "12.8")
