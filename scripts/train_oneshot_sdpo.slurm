@@ -51,8 +51,11 @@ export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 
-# CUPTI fix: LD_LIBRARY_PATH is set inside the container by _train_inner.sh,
-# AFTER --nv injects its CUDA driver paths. See scripts/_train_inner.sh.
+# CUPTI fix: --nv rewrites LD_LIBRARY_PATH but does NOT touch LD_PRELOAD.
+# APPTAINERENV_LD_PRELOAD becomes LD_PRELOAD inside the container unchanged,
+# force-loading libcupti.so.12 before torch loads libtorch_cpu.so.
+# libcupti.so.12 lives in the nvidia Python package inside the container.
+export APPTAINERENV_LD_PRELOAD="/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib/libcupti.so.12"
 
 # vLLM settings (from SDPO verl_training.sh)
 # V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
@@ -118,14 +121,11 @@ echo "================================================================"
 
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
 
-# _train_inner.sh runs inside the container and sets LD_LIBRARY_PATH there,
-# AFTER --nv has injected its CUDA driver paths. This is the same pattern
-# used by the smoke test (run_local_test.sh) which is confirmed working.
 apptainer exec --nv \
     --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
     --bind "/home/woody/iwi7/iwi7107h/models:/home/woody/iwi7/iwi7107h/models" \
     "${SIF}" \
-    bash "${PROJECT_ROOT}/scripts/_train_inner.sh" \
+    python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \
     \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
