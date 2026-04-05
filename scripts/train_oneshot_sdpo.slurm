@@ -72,6 +72,12 @@ unset ROCR_VISIBLE_DEVICES
 export VLLM_DISABLE_COMPILE_CACHE=1
 export PYTHONUNBUFFERED=1
 
+# Block ~/.local/lib/python3.12/site-packages from being loaded inside the container.
+# The user has an incompatible Triton installed at ~/.local that overrides the container's
+# Triton, causing: triton.compiler.errors.CompilationError (uint32/int32 signedness mismatch)
+# in vLLM's topk_topp_triton kernel during profile_run().
+export PYTHONNOUSERSITE=1
+
 # Suppress known-benign warning from verl's multimodal processor path:
 #   "Unsupported processor type: Qwen2TokenizerFast"
 # This code path is not used for text-only math training.
