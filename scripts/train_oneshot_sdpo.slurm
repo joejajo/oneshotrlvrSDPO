@@ -146,6 +146,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.max_model_len=8192 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
+    actor_rollout_ref.rollout.enforce_eager=True \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
