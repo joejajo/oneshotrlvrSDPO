@@ -60,11 +60,12 @@ export PATH="${CUDA_HOME}/bin:${PATH}"
 _NV="/usr/local/lib/python3.12/dist-packages/nvidia"
 export APPTAINERENV_LD_PRELOAD="${_NV}/cuda_cupti/lib/libcupti.so.12:${_NV}/nccl/lib/libnccl.so.2"
 
-# vLLM settings (from SDPO verl_training.sh)
-# V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
+# vLLM settings
+# VLLM_USE_V1 is NOT recognized by vLLM 0.17.0 — triggers "Unknown env var" warning.
+# VLLM_DISABLE_COMPILE_CACHE=1 suppresses the torch.compile serialization crash.
 unset VLLM_ATTENTION_BACKEND
 unset ROCR_VISIBLE_DEVICES
-export VLLM_USE_V1=1
+export VLLM_DISABLE_COMPILE_CACHE=1
 export PYTHONUNBUFFERED=1
 
 # Suppress known-benign warning from verl's multimodal processor path:
