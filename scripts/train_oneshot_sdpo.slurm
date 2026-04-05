@@ -51,11 +51,8 @@ export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 
-# CUPTI fix: LD_LIBRARY_PATH is set inside the container via bash -c below,
-# AFTER --nv injects its CUDA driver paths (so we prepend without losing them).
-# APPTAINERENV_LD_LIBRARY_PATH does NOT survive --nv rewriting on this HPC.
-# The inner bash -c approach mirrors what run_local_test.sh does successfully.
-CUPTI_LIB="/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib"
+# CUPTI fix: LD_LIBRARY_PATH is set inside the container by _train_inner.sh,
+# AFTER --nv injects its CUDA driver paths. See scripts/_train_inner.sh.
 
 # vLLM settings (from SDPO verl_training.sh)
 # V1 engine uses FlashAttention by default — do NOT set VLLM_ATTENTION_BACKEND
@@ -121,15 +118,14 @@ echo "================================================================"
 
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
 
-# Wrap in bash -c so LD_LIBRARY_PATH is set INSIDE the container after --nv
-# injects its own CUDA driver paths. "$@" forwards all Hydra args to python.
+# _train_inner.sh runs inside the container and sets LD_LIBRARY_PATH there,
+# AFTER --nv has injected its CUDA driver paths. This is the same pattern
+# used by the smoke test (run_local_test.sh) which is confirmed working.
 apptainer exec --nv \
     --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
     --bind "/home/woody/iwi7/iwi7107h/models:/home/woody/iwi7/iwi7107h/models" \
     "${SIF}" \
-    bash -c \
-    'export LD_LIBRARY_PATH="'"${CUPTI_LIB}"':${LD_LIBRARY_PATH}"; exec python -m verl.trainer.main_ppo "$@"' \
-    -- \
+    bash "${PROJECT_ROOT}/scripts/_train_inner.sh" \
     --config-name ppo_trainer \
     \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
