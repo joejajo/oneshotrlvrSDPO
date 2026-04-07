@@ -76,6 +76,10 @@ export PYTHONUNBUFFERED=1
 # in vLLM's topk_topp_triton kernel during profile_run().
 export PYTHONNOUSERSITE=1
 
+# Prevent uvloop from calling getenv("UV_THREADPOOL_SIZE") during event loop init.
+# Without this, concurrent AgentLoopWorker actor spawns race in glibc getenv → SIGSEGV.
+export APPTAINERENV_UV_THREADPOOL_SIZE=4
+
 # Suppress known-benign warning from verl's multimodal processor path:
 #   "Unsupported processor type: Qwen2TokenizerFast"
 # This code path is not used for text-only math training.
