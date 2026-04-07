@@ -156,6 +156,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.enforce_eager=True \
+    actor_rollout_ref.rollout.agent.num_workers=1 \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
@@ -189,6 +190,7 @@ apptainer exec --nv \
     data.train_files="[${TRAIN_PARQUET}]" \
     data.val_files="[${EVAL_PARQUET}]" \
     data.train_batch_size=128 \
+    data.val_batch_size=64 \
     data.max_prompt_length=1024 \
     data.max_response_length=3072 \
     data.filter_overlong_prompts=True \
