@@ -13,6 +13,23 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
+### 2026-04-07 — Fix OOM: reduce token budget for SDPO dual-pass
+
+**Files**: `scripts/train_oneshot_sdpo.slurm`
+
+Job crashed at step 0 actor update with OOM on `logsumexp(logits)` in teacher forward.
+SDPO runs two forward passes (student + teacher) and holds both logit tensors simultaneously.
+With vocab=151936: 20000 tokens × 151936 × 2 bytes × 2 = 11.6 GB → OOM on 40GB A100.
+
+**Baseline confirmed**: step 0 val = **31.4%** MATH-500 (Qwen2.5-Math-1.5B base).
+
+| Parameter | Before | After | Reason |
+|---|---|---|---|
+| `ppo_mini_batch_size` | `128` | `64` | halve sequences per update |
+| `ppo_max_token_len_per_gpu` | `20000` | `8000` | dual-pass logit memory: 8000×151936×2×2=4.6GB fits |
+
+---
+
 ### 2026-04-07 — Bump training steps to 1200
 
 **Files**: `scripts/train_oneshot_sdpo.slurm`
