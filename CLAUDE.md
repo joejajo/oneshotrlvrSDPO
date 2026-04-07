@@ -17,14 +17,19 @@ of GRPO.
 The SDPO verl fork is the **single source of truth** for all config keys, APIs, and
 training logic. Check it first before answering any question.
 
+The **trimmed SDPO source** (verl/ only, no examples/experiments/build artifacts) is
+committed directly in this repo at `SDPO/` and is what gets pulled on HPC via `git pull`.
+See the [SDPO source layout](#hpc-layout) section below.
+
 ---
 
 ## ALWAYS Cross-Check Against SDPO First
 
 Before answering questions about config keys, hyperparameters, reward function signature,
-data format, or script args — verify against **https://github.com/lasgroup/SDPO**.
+data format, or script args — verify against the SDPO source in `SDPO/verl/` (committed
+in this repo) or upstream at **https://github.com/lasgroup/SDPO**.
 
-Canonical files in the SDPO repo:
+Canonical files (all under `SDPO/verl/` in this repo):
 
 | File | What it defines |
 |---|---|
@@ -32,11 +37,10 @@ Canonical files in the SDPO repo:
 | `verl/trainer/config/actor/actor.yaml` | Actor + SDPO self-distillation defaults |
 | `verl/trainer/config/rollout/rollout.yaml` | vLLM rollout defaults |
 | `verl/trainer/config/sdpo.yaml` | SDPO overrides (inherits ppo_trainer + user) |
-| `verl/trainer/ppo/core_algos.py` | `compute_self_distillation_loss` — JSD loss |
+| `verl/trainer/ppo/core_algos.py` | `compute_self_distillation_loss` — distillation loss |
 | `verl/workers/reward_manager/naive.py` | `NaiveRewardManager` — calls `compute_score` |
 | `verl/workers/actor/dp_actor.py` | `SDPOActor` — EMA teacher update |
 | `verl/trainer/main_ppo.py` | Entry point: `python -m verl.trainer.main_ppo` |
-| `training/verl_training.sh` | SDPO launch wrapper |
 
 ---
 
@@ -128,16 +132,17 @@ SDPO (Self-Distilled Policy Optimization) extends GRPO with:
    rollout (if any) is appended to the prompt as a demonstration for the next attempt.
    (`include_environment_feedback=false` → only successful solutions, no feedback text).
 
-3. **JSD distillation loss**: Instead of pure policy gradient, the loss is a JSD
-   (Jensen-Shannon divergence) between student and teacher token distributions on the
-   reprompted trajectories. `alpha=0.5` gives symmetric JSD.
+3. **Distillation loss**: Instead of pure policy gradient, the loss is a weighted KL
+   between student and teacher token distributions on the reprompted trajectories.
+   `alpha=1.0` gives pure reverse KL (mode-seeking: student imitates teacher's best
+   solution exactly). `alpha=0.5` gives symmetric JSD. We use `alpha=1.0`.
 
 4. **Importance sampling correction** (`rollout_is=token`, threshold=2.0): Corrects
    for distribution shift between rollout-time and update-time policies.
 
 The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` implements:
-- Full-logit KL with top-k truncation (top-100 tokens)
-- JSD = alpha * forward_KL + (1-alpha) * reverse_KL
+- Full-logit KL with top-k truncation (top-`distillation_topk` tokens; we use 20)
+- loss = alpha * forward_KL + (1-alpha) * reverse_KL
 - IS weighting clipped at `is_clip=2.0`
 
 ---
@@ -168,10 +173,10 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
 | `self_distillation.max_reprompt_len` | `10240` | `4096` | Caps reprompt + feedback length |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
-| `self_distillation.distillation_topk` | `100` | `100` | Same as default |
-| `self_distillation.alpha` | `0.5` | `0.5` | JSD (symmetric) |
+| `self_distillation.distillation_topk` | `100` | `20` | Matches SDPO rich_feedback experiments; less compute |
+| `self_distillation.alpha` | `0.5` | `1.0` | Pure reverse KL (mode-seeking); matches SDPO rich_feedback experiments |
 | `self_distillation.teacher_regularization` | `ema` | `ema` | Standard SDPO |
-| `self_distillation.teacher_update_rate` | `0.05` | `0.05` | Same as default |
+| `self_distillation.teacher_update_rate` | `0.05` | `0.01` | Slower EMA = more stable teacher; matches SDPO rich_feedback experiments |
 | `self_distillation.is_clip` | `2` | `2.0` | Same as default |
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
@@ -206,22 +211,25 @@ trainer.val_before_train: False  # they skip val; we keep it
 
 ---
 
-## What Files We Need From SDPO (Answer: None — Use PYTHONPATH)
+## SDPO Source in This Repo
 
-**DO NOT copy files from `lasgroup/SDPO/verl/` into this repo.**
+The **trimmed SDPO source** is committed directly in this repo at `SDPO/` on branch
+`claude/integrate-rlvr-sdpo-dlMU5`. It contains only what is needed to run training:
+
+| Kept | Removed (not needed at runtime) |
+|---|---|
+| `SDPO/verl/` — full verl Python source | `examples/`, `experiments/`, `scripts/`, `training/` |
+| `SDPO/pyproject.toml`, `requirements.txt` | `verl.egg-info/`, `requirements-{cuda,full,test}.txt` |
+| `SDPO/verl/experimental/agent_loop/` | `verl/experimental/{vla,fully_async_policy,one_step_off_policy,...}` |
+| `SDPO/verl/workers/` (fsdp, vllm, reward) | `verl/workers/megatron_workers.py` |
+| `SDPO/verl/trainer/{main_ppo,ppo/,config/}` | `verl/trainer/{sft_trainer*.py,main_eval.py,main_generation*.py}` |
+| `SDPO/verl/utils/` (most) | `verl/utils/{sglang/,megatron/,megatron_utils.py,npu_flash_attn_utils.py}` |
+
 The Apptainer container is **read-only**, so `pip install -e .` cannot be used inside it.
-Instead, the SDPO source is accessed via `PYTHONPATH` pointing at the local clone.
-Copying files would create stale duplicates.
+verl is loaded via `PYTHONPATH="${ONESHOT_DIR}/SDPO"` — no install step needed.
 
-| SDPO directory | Do we copy it? | Why |
-|---|---|---|
-| `verl/` (all subdirs) | **NO** | Loaded via `PYTHONPATH=${ONESHOT_DIR}/SDPO` |
-| `training/verl_training.sh` | **NO** | We have our own slurm + run scripts |
-| `run_local_sdpo.sh` | **NO** | Reference only; we have run_local_test.sh |
-| `examples/` | **NO** | Reference only |
-| `docs/` | **NO** | Documentation only |
-| `requirements.txt` | **NO** | Pre-installed in the container image |
-| `requirements-cuda.txt` | **NO** | Pre-installed in the container image |
+**On HPC**: `SDPO/` is pulled as part of the normal `git pull` — no separate clone needed.
+The `.gitignore` previously excluded it but the trimmed version is now tracked.
 
 **`verl/utils/reward_score/__init__.py` — why we bypass it**:
 `default_compute_score` dispatches by `data_source` and raises `NotImplementedError`
@@ -397,15 +405,13 @@ oneshotrlvrSDPO/
 HPC layout:
 ```
 /home/woody/iwi7/iwi7107h/
-├── oneshotrlvrSDPO/        ← this repo
-│   ├── SDPO/               ← full clone of https://github.com/lasgroup/SDPO
-│   │                          (the ORIGINAL upstream SDPO repo, cloned directly here)
-│   │                          NOT committed to git (in .gitignore)
+├── oneshotrlvrSDPO/        ← this repo (git pull brings everything including SDPO/)
+│   ├── SDPO/               ← trimmed SDPO verl source (committed to git)
+│   │                          pulled via normal git pull — no separate clone needed
 │   │                          verl loaded from here via PYTHONPATH at runtime
 │   │   ├── verl/           ← verl fork with SDPO modifications (main source)
-│   │   ├── training/       ← SDPO's own training scripts (reference only)
-│   │   ├── requirements.txt
-│   │   └── ...             ← full lasgroup/SDPO repo contents
+│   │   ├── pyproject.toml
+│   │   └── requirements.txt
 │   ├── data/
 │   ├── reward/
 │   ├── scripts/
@@ -418,18 +424,15 @@ HPC layout:
     └── Qwen2.5-Math-1.5B/  ← base model
 ```
 
-**`SDPO/` is the complete, unmodified `lasgroup/SDPO` repository** cloned directly inside
-the wrapper repo at `oneshotrlvrSDPO/SDPO/`. It is NOT committed to git (in `.gitignore`).
-This is intentional: by keeping the original SDPO source here, all verl APIs are accessible
-via `PYTHONPATH="${ONESHOT_DIR}/SDPO"` — no install step is needed, which is the only
-approach that works in the read-only Apptainer container.
+**`SDPO/` is now committed in this repo** (trimmed: verl/ source only, no examples/scripts).
+All verl APIs are accessible via `PYTHONPATH="${ONESHOT_DIR}/SDPO"` — no install step needed.
+This is the only approach that works in the read-only Apptainer container.
 
-To clone/update SDPO on HPC:
+To get SDPO on HPC — just pull the repo:
 ```bash
 cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
-git clone https://github.com/lasgroup/SDPO SDPO
-# or to update:
-cd SDPO && git pull origin main
+GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull origin claude/integrate-rlvr-sdpo-dlMU5
+# SDPO/ will be present under oneshotrlvrSDPO/SDPO/
 ```
 
 ---
@@ -471,25 +474,27 @@ sbatch scripts/train_oneshot_sdpo.slurm
 
 ---
 
-## Cross-Check: SDPO `run_local_sdpo.sh` Confirms Our Settings
+## Cross-Check: SDPO Rich Feedback Experiment Confirms Our Settings
 
-From `lasgroup/SDPO/run_local_sdpo.sh` (the canonical local SDPO run script):
+Our hyperparameters are taken directly from
+`lasgroup/SDPO/experiments/rich_feedback/run_sdpo.sh` — the SDPO team's own
+rich-feedback experiment (the closest analogue to our setup: EMA teacher + feedback):
 
 ```bash
-TRAIN_BATCH_SIZE=32       # 1 GPU; we use 128 for 4 GPUs
-ROLLOUT_BATCH_SIZE=8      # = rollout.n; matches our n=8
-LR=1e-5                   # their default; we use 1e-6 (more conservative)
-ALPHA=0.5                 # JSD; matches ours
-actor_rollout_ref.actor.optim.lr_warmup_steps=10       # matches ours
-actor_rollout_ref.actor.self_distillation.distillation_topk=100  # matches ours
-actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=True  # matches ours
-algorithm.rollout_correction.rollout_is=token          # matches ours
-actor_rollout_ref.rollout.val_kwargs.n=16              # matches ours
+# From experiments/rich_feedback/run_sdpo.sh (CSCS cluster, Qwen3-8B, lcb_v6 dataset)
+ROLLOUT_BATCH_SIZE=8                                           # = rollout.n; matches our n=8
+LR=1e-6                                                        # matches ours
+alpha=1.0                                                      # reverse KL → our alpha=1.0
+teacher_update_rate=0.01                                       # slow EMA → our 0.01
+distillation_topk=20                                           # → our topk=20
+dont_reprompt_on_self_success=True                             # matches ours
+algorithm.rollout_correction.rollout_is=token                  # matches ours
+val_kwargs.n=4                                                 # they use 4; we use 1 (500 problems × 4 = too slow)
 ```
 
-Note: `run_local_sdpo.sh` uses `CONFIG_NAME="sdpo"` (which inherits `user.yaml` and
-requires `TASK` + `EXPERIMENT` env vars set for CSCS cluster). We use `ppo_trainer`
-instead and set all SDPO keys explicitly — same effect, no cluster dependency.
+Note: their script targets CSCS cluster (different env/slurm syntax) and uses
+`lcb_v6` coding data on Qwen3-8B. Our task is math (π₁, Qwen2.5-Math-1.5B) but
+the SDPO hyperparameters transfer directly.
 
 ---
 
