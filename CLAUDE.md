@@ -1,5 +1,9 @@
 # CLAUDE.md — One-Shot-RLVR + SDPO
 
+> **Convention**: Update this file and `CHANGES.md` whenever config, code, or decisions
+> change. `CHANGES.md` is the session log (what changed + why). This file is the
+> authoritative reference (what is currently true).
+
 ## What We Are Building
 
 **Goal**: Reproduce the One-Shot-RLVR result (training Qwen2.5-Math-1.5B on a single
