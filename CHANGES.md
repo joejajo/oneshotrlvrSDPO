@@ -13,6 +13,19 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
+### 2026-04-07 — Bump training steps to 1200
+
+**Files**: `scripts/train_oneshot_sdpo.slurm`
+
+| Parameter | Before | After | Reason |
+|---|---|---|---|
+| `total_training_steps` | `500` | `1200` | One-Shot-RLVR paper shows peak at step ~1540; 500 stops mid-climb |
+
+Job resubmitted on HPC with 1200 steps (Run 1: pure SDPO, no entropy).
+Next run (Run 2) will add `entropy_coeff=0.001` + `calculate_entropy=true`.
+
+---
+
 ### 2026-04-07 — Hyperparameter alignment with SDPO rich_feedback experiments
 
 **Files**: `scripts/train_oneshot_sdpo.slurm`, `CLAUDE.md`

@@ -206,7 +206,7 @@ apptainer exec --nv \
     'trainer.logger=["console","tensorboard"]' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
-    trainer.total_training_steps=500 \
+    trainer.total_training_steps=1200 \
     trainer.save_freq=10 \
     trainer.test_freq=25 \
     trainer.val_before_train=True \
