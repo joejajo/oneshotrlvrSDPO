@@ -279,11 +279,14 @@ return {"score": 0.0, "extracted_answer": model_answer, "feedback": "<π₁ hint
 values into numpy arrays across the batch. Python `bool` becomes `numpy.bool_`,
 which `json.dumps` rejects with `TypeError`. `score=1.0/0.0` encodes correctness.
 
-**`feedback` key**: Rich deterministic hints for failed π₁ rollouts:
-- No `\boxed{}` found → "Your response did not include an answer in \\boxed{} format. Use the relation P = k A V^3..."
-- Wrong answer → "Use the relation P = k A V^3. Recompute k = 1/256. Simplify to V^3 = 2048..."
+**`feedback` key**: Minimal, non-revealing signal for failed π₁ rollouts:
+- No `\boxed{}` found → only corrects output format: "Please state your answer as `\boxed{your answer}`" — no math content
+- Wrong answer → `"feedback": ""` (empty) — no hint; the EMA teacher's successful rollout is the real learning signal
 - Correct → `"feedback": ""` (empty)
-- Non-π₁ problems (MATH-500 validation) → generic fallback messages
+- Non-π₁ problems (MATH-500 validation) → `"feedback": ""` (empty)
+
+The feedback is **intentionally non-revealing** — it never leaks the answer, formula, or steps.
+Learning comes from the EMA teacher's demonstration, not from the feedback string.
 
 Grading: extract `\boxed{}` → `grade_answer_mathd` OR `grade_answer_sympy`.
 Both taken verbatim from One-Shot-RLVR `verl/utils/reward_score/utils/utils.py`.
