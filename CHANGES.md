@@ -13,6 +13,25 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
+### 2026-04-08 — Remove expandable_segments (incompatible with vLLM CuMemAllocator)
+
+**Files**: `scripts/train_oneshot_sdpo.slurm`
+
+Job 1568106 crashed at startup (3 min) with:
+```
+AssertionError: Expandable segments are not compatible with memory pool.
+Please track https://github.com/pytorch/pytorch/issues/147851 for the latest updates.
+```
+
+`vLLM v1's CuMemAllocator` (`vllm/device_allocator/cumem.py`) explicitly asserts that
+`expandable_segments:True` is NOT set in `PYTORCH_CUDA_ALLOC_CONF`. Removed the env var.
+
+OOM mitigation at π₁ saturation (step 11+) now relies solely on `ppo_mini_batch_size=32`:
+- 32 sequences × 2000 tokens/seq / 4 GPUs = 8000 tokens per GPU → ~4.87 GB logits (fits)
+- Previously needed expandable_segments because 64 sequences → 16000 tokens → 9.75 GB OOM
+
+---
+
 ### 2026-04-08 — Switch to condition A: scalar-only (primary experiment)
 
 **Files**: `scripts/train_oneshot_sdpo.slurm`, `CLAUDE.md`

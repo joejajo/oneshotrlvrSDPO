@@ -89,10 +89,11 @@ export PYTHONWARNINGS="ignore:Unsupported processor type"
 # "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
 export TMPDIR=/tmp
 
-# Fix CUDA memory fragmentation: set expandable_segments before CUDA init.
-# At π₁ saturation (~step 11), reprompted sequences grow to ~2000 tokens causing
-# fragmentation in PyTorch's caching allocator → OOM even with free memory available.
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+# NOTE: expandable_segments:True was previously set here to fix fragmentation OOM at
+# π₁ saturation (~step 11). Removed because vLLM v1's CuMemAllocator explicitly
+# forbids it: "Expandable segments are not compatible with memory pool"
+# (vllm/device_allocator/cumem.py). OOM fragmentation is now mitigated solely by
+# ppo_mini_batch_size=32 (halved from 64), which keeps peak logit memory ~4.87 GB/GPU.
 
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
 # Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
