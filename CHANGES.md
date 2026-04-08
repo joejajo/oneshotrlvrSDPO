@@ -13,33 +13,49 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
-### 2026-04-08 — Paper-faithful feedback mechanism (SDPO Figure 4)
+### 2026-04-08 — Localized verification feedback (SDPO Figure 4 mechanism)
 
 **Files**: `reward/math_reward.py`, `scripts/train_oneshot_sdpo.slurm`
 
-Implemented the environment feedback mechanism exactly as described in the SDPO paper
-(arXiv:2601.20802, Figure 4 / Table 2):
+Implemented the SDPO paper's Figure 4 feedback mechanism: the self-teacher re-evaluates
+the original response tokens y conditioned on [x, f, y_{<t}]. The KL loss is **sparse**
+— disagreement concentrates at the specific tokens the feedback contradicts, not the
+entire sequence. "Don't include n." makes the teacher disagree at `+1`, not everywhere.
 
-1. **`reward/math_reward.py`**: Changed `_FEEDBACK_WRONG = ""` to
-   `f"Your answer {model_answer} is incorrect."` — math analog of a coding test's
-   `"AssertionError: expected 12.8, got 10"`. Specific, factual, no correct-answer hint.
+Two changes:
 
-2. **`train_oneshot_sdpo.slurm`**: Changed `environment_feedback_only_without_solution`
-   from `true` → `false`. Paper Table 2 full template uses BOTH the solution AND the
-   feedback simultaneously in the reprompt:
-   ```
-   Correct solution: [teacher's correct derivation]
-   The following is feedback from your unsuccessful earlier attempt:
-   Your answer 10 is incorrect.
-   Correctly solve the original question.
-   ```
-   Previously we suppressed feedback when a solution existed — that was a conservative
-   departure from the paper. Now we use both together.
+**1. Localized verification feedback for π₁ (`reward/math_reward.py`)**
 
-**Effect on reprompting**: At step 12 (~50% success), failed rollout that answered `10`
-now sees: correct solution (12.8 derivation) + "Your answer 10 is incorrect." The
-self-teacher conditions on both and assigns per-token credit to the original response,
-identifying the token(s) where the cube root calculation went wrong.
+Two tiers depending on what the student's response contains:
+
+- **Tier 1** (response contains "2048" → correct intermediate V³=2048, wrong cube root):
+  `"V³ = 2048 is correct, but ∛2048 ≠ {answer}. Re-check the cube root step."`
+  → teacher disagrees only at the cube-root tokens; rest of derivation gets no blame
+
+- **Tier 2** (no "2048" → bad setup from earlier in the derivation):
+  `"Checking: with V={answer}, P = (1/256)×4×{answer}³ = {computed:.4f}, but P should equal 32. Re-check your setup."`
+  → math analog of `"AssertionError: expected 32, got 15.625"` — shows how far off V was
+
+- **MATH-500 / other data sources**: `"Your answer {X} is incorrect."` (fallback; validation
+  does not use reprompting so feedback is irrelevant there)
+
+Examples from step 12 rollouts:
+| Answer | Tier | Feedback |
+|--------|------|---------|
+| 10 | 2 (bad setup) | `P = 15.625 ≠ 32. Re-check your setup.` |
+| 12 | 1 (∛ wrong) | `V³ = 2048 correct, but ∛2048 ≠ 12. Re-check cube root.` |
+| 12.7 | 1 (∛ rounding) | `V³ = 2048 correct, but ∛2048 ≠ 12.7. Re-check cube root.` |
+| 64 | 2 (bad setup) | `P = 4096 ≠ 32. Re-check your setup.` |
+
+**2. `environment_feedback_only_without_solution=false`** (`train_oneshot_sdpo.slurm`)
+
+Paper Table 2 full template uses BOTH solution AND feedback simultaneously:
+```
+Correct solution: [teacher's correct derivation]
+The following is feedback from your unsuccessful earlier attempt:
+V³ = 2048 is correct, but ∛2048 ≠ 12. Re-check the cube root step.
+Correctly solve the original question.
+```
 
 ---
 

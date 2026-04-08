@@ -517,24 +517,34 @@ def extract_answer(passage: str) -> str:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Feedback for failed rollouts — paper-faithful environment feedback.
+# Feedback for failed rollouts — paper-faithful, localized environment signal.
 #
-# Matches the SDPO paper (arXiv:2601.20802) Figure 4 / Table 2:
-#   feedback f is the environment's signal about what went wrong.
-#   For coding: runtime error / failing test output.
-#   For math: "Your answer X is incorrect." — concise, factual, no hint.
+# Matches the SDPO paper (arXiv:2601.20802) Figure 4 mechanism:
+#   The self-teacher re-evaluates the original response tokens y conditioned
+#   on [x, f, y_{<t}]. The KL loss is sparse — disagreement concentrates at
+#   the specific tokens the feedback contradicts.
 #
-# Used by SDPO ray_trainer when include_environment_feedback=true.
-# With environment_feedback_only_without_solution=false, this feedback
-# appears alongside the teacher's successful demonstration in the reprompt:
+# For coding (Figure 4): "Don't include n." → teacher disagrees mainly at
+#   the `+1` token. The rest of the response gets near-zero blame.
 #
-#   Correct solution: [teacher's correct derivation → 12.8]
-#   The following is feedback from your unsuccessful earlier attempt:
-#   Your answer 10 is incorrect.
-#   Correctly solve the original question.
+# For math (π₁, data_source="deepscaler"): we compute the verification step
+#   P = (1/256)×4×V³ using the student's V and compare to the expected P=32.
+#   This is the math analog of running the code and showing the assertion:
+#     "AssertionError: expected 32, got 1.5625"
+#   The self-teacher, seeing this discrepancy, can localize blame to the
+#   cube-root computation tokens rather than just the final \boxed{} token.
 #
-# This gives the model both: what the right answer looks like (solution)
-# and confirmation that its specific attempt was wrong (feedback).
+#   Two tiers of feedback:
+#   1. Model reached V³ = 2048 (correct intermediate) but wrong cube root:
+#      → "V³ = 2048 is correct, but ∛2048 ≠ {answer}. Re-check cube root."
+#      → most localized: teacher disagrees only at the cube-root step
+#   2. Model never reached V³ = 2048 (wrong setup):
+#      → "Checking V = {answer}: P = {computed:.4f} ≠ 32. Check your setup."
+#      → teacher disagrees across the derivation
+#
+# For all other data sources (e.g. MATH-500 validation): fallback to
+# "Your answer X is incorrect." — no problem-specific formula available,
+# and validation does not use reprompting anyway.
 # ---------------------------------------------------------------------------
 
 _FEEDBACK_NO_BOXED = (
@@ -542,16 +552,51 @@ _FEEDBACK_NO_BOXED = (
     "Please state your answer as \\boxed{your answer}."
 )
 
+# π₁ verification constants (P = k·A·V³, k=1/256, A=4, P_target=32)
+_PI1_K = 1.0 / 256.0
+_PI1_A = 4.0
+_PI1_P_TARGET = 32.0
+# Correct intermediate: V³ = P_target / (k * A) = 32 * 64 = 2048
+_PI1_V_CUBED = _PI1_P_TARGET / (_PI1_K * _PI1_A)   # 2048.0
 
-def _make_feedback(no_boxed: bool, model_answer: str = "") -> str:
-    """Return environment feedback for a failed rollout.
+
+def _make_feedback(no_boxed: bool, model_answer: str = "", data_source: str = "",
+                   solution_str: str = "") -> str:
+    """Return localized environment feedback for a failed rollout.
 
     no_boxed=True  → format error: nudge to use \\boxed{}
-    no_boxed=False → wrong answer: report which answer was incorrect
+    no_boxed=False → wrong answer: verification feedback localized to the
+                     mistaken computation step (π₁) or generic (other problems)
     """
     if no_boxed:
         return _FEEDBACK_NO_BOXED
-    return f"Your answer {model_answer} is incorrect."
+
+    # π₁-specific verification feedback (training data only).
+    # Localizes blame to the cube-root step vs. the setup step.
+    if data_source == "deepscaler" and model_answer:
+        try:
+            v = float(model_answer)
+            # Tier 1: model reached correct intermediate V³ = 2048
+            # (check if "2048" appears in the response chain-of-thought)
+            if "2048" in solution_str:
+                return (
+                    f"V\u00b3 = 2048 is correct, but \u221b2048 \u2260 {model_answer}. "
+                    f"Re-check the cube root step."
+                )
+            # Tier 2: model did not reach V³ = 2048 — show the verification
+            p_computed = _PI1_K * _PI1_A * (v ** 3)
+            return (
+                f"Checking your answer: with V = {model_answer}, "
+                f"P = (1/256) \u00d7 4 \u00d7 {model_answer}\u00b3 = {p_computed:.4f}, "
+                f"but P should equal 32. Re-check your setup."
+            )
+        except (ValueError, TypeError):
+            pass
+
+    # Fallback for other data sources (MATH-500 validation, etc.)
+    if model_answer:
+        return f"Your answer {model_answer} is incorrect."
+    return "Your answer is incorrect."
 
 
 def compute_score(
@@ -611,7 +656,8 @@ def compute_score(
         return {
             "score": 0.0,
             "extracted_answer": model_answer,
-            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer),
+            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
+                                       data_source=data_source, solution_str=solution_str),
         }
 
     for gt in processed_ground_truths:
@@ -622,7 +668,8 @@ def compute_score(
     return {
         "score": 0.0,
         "extracted_answer": model_answer,
-        "feedback": _make_feedback(no_boxed=False, model_answer=model_answer),
+        "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
+                                   data_source=data_source, solution_str=solution_str),
     }
 
 
@@ -637,11 +684,25 @@ if __name__ == "__main__":
     assert r["feedback"] == "", f"Expected empty feedback on correct, got {r['feedback']}"
     assert "is_correct" not in r, "is_correct must not appear (causes numpy.bool_ serialization error)"
 
-    # Wrong answer — feedback reports the student's wrong answer (paper Figure 4 style)
+    # Wrong answer — non-pi1 (MATH-500): generic fallback feedback
     r = compute_score("lighteval/MATH", "\\boxed{15}", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert "15" in r["feedback"], f"Feedback should name the wrong answer, got {r['feedback']}"
     assert r["feedback"] == "Your answer 15 is incorrect.", f"Unexpected feedback: {r['feedback']}"
+
+    # π₁ Tier 1: model wrote V³=2048 but wrong cube root
+    # → localized to cube-root step
+    response_with_2048 = "32 = (1/256)*4*V^3, so V^3 = 2048, V = 12 \\boxed{12}"
+    r = compute_score("deepscaler", response_with_2048, "12.8")
+    assert r["score"] == 0.0, f"Expected 0.0, got {r}"
+    assert "2048" in r["feedback"] and "cube root" in r["feedback"], \
+        f"Tier 1 feedback should mention 2048 and cube root, got: {r['feedback']}"
+
+    # π₁ Tier 2: model did not reach V³=2048 — verification check
+    response_without_2048 = "P = k*A*V^3, so V = 10 \\boxed{10}"
+    r = compute_score("deepscaler", response_without_2048, "12.8")
+    assert r["score"] == 0.0, f"Expected 0.0, got {r}"
+    assert "1.5625" in r["feedback"] or "P" in r["feedback"], \
+        f"Tier 2 feedback should show verification, got: {r['feedback']}"
 
     # No \boxed{} at all
     r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8")
