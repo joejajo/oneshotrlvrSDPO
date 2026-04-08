@@ -172,8 +172,8 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 |---|---|---|---|
 | `policy_loss.loss_mode` | `"vanilla"` | `sdpo` | **Required** for SDPO loss |
 | `self_distillation.success_reward_threshold` | `0.5` (YAML) / `1.0` (docs — docs are wrong, YAML is authoritative) | `1.0` | Binary reward; only perfect = teacher |
-| `self_distillation.include_environment_feedback` | `True` | `true` | Rich π₁ feedback enabled |
-| `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | Paper-faithful: use feedback alongside solution (both in reprompt) |
+| `self_distillation.include_environment_feedback` | `True` | `false` | **Condition A (primary)**: scalar-only, matches SDPO paper Section 3 math regime — successful sibling rollouts are the only implicit feedback, no environment text |
+| `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | N/A when include_environment_feedback=false |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
 | `self_distillation.max_reprompt_len` | `10240` | `4096` | Caps reprompt + feedback length |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
@@ -283,24 +283,26 @@ return {"score": 0.0, "extracted_answer": model_answer, "feedback": "<π₁ hint
 values into numpy arrays across the batch. Python `bool` becomes `numpy.bool_`,
 which `json.dumps` rejects with `TypeError`. `score=1.0/0.0` encodes correctness.
 
-**`feedback` key**: Paper-faithful environment feedback (SDPO Figure 4 / Table 2):
-- No `\boxed{}` found → `"Your previous response did not include a final answer in \boxed{} format. Please state your answer as \boxed{your answer}."` — format correction
-- Wrong answer → `"Your answer {X} is incorrect."` — names the wrong value; math analog of a coding test's `"AssertionError: expected 12.8, got 10"`
-- Correct → `"feedback": ""` (empty)
+**`feedback` key**: `compute_score` returns a `feedback` string, but for the primary
+experiment (`include_environment_feedback=false`, condition A) it is **not consumed** by
+SDPO — the trainer ignores it and uses only the scalar reward + sibling solutions.
 
-With `environment_feedback_only_without_solution=false`, this feedback appears **alongside**
-the teacher's successful demonstration in the reprompt (paper Table 2 full template):
+The feedback strings are still computed and appear in the rollout JSONL for debugging:
+- No `\boxed{}` found → format correction nudge
+- Wrong answer (π₁, "2048" in response) → `"V³ = 2048 is correct, but ∛2048 ≠ {X}. Re-check cube root."` (Layer 2 verifier)
+- Wrong answer (all others) → `"Your answer {X} is incorrect."` (Layer 1 generic)
+- Correct → `""` (empty)
 
-```
-Correct solution: [teacher's correct derivation → \boxed{12.8}]
-The following is feedback from your unsuccessful earlier attempt:
-Your answer 10 is incorrect.
-Correctly solve the original question.
-```
+**Why condition A (scalar-only) is the primary experiment**:
+SDPO paper Section 3 explicitly covers the "learning without rich feedback" regime for
+math/scalar-reward tasks. In this regime, successful sibling rollouts from the same
+rollout group (8 rollouts per prompt) serve as the only implicit feedback f_i. No
+environment text is needed. The teacher re-evaluates the ORIGINAL failed response
+conditioned on [question + sibling solution], assigning per-token credit without any
+text hint about what went wrong. This is what we're reproducing.
 
-The self-teacher (EMA of student, conditioned on feedback) re-evaluates the original response
-tokens and identifies precisely where the derivation went wrong — per-token credit assignment
-as shown in Figure 4 of the paper.
+Rich environment feedback (Figure 4 coding setting) and the localized verifier (our
+Layer 2) are secondary ablations (conditions B–D in the slurm script).
 
 Grading: extract `\boxed{}` → `grade_answer_mathd` OR `grade_answer_sympy`.
 Both taken verbatim from One-Shot-RLVR `verl/utils/reward_score/utils/utils.py`.

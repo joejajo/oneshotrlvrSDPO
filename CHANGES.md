@@ -13,6 +13,32 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
+### 2026-04-08 — Switch to condition A: scalar-only (primary experiment)
+
+**Files**: `scripts/train_oneshot_sdpo.slurm`, `CLAUDE.md`
+
+Set `include_environment_feedback=false`. This is condition A — the primary experiment.
+
+**Rationale**: The SDPO paper explicitly separates two regimes:
+- Section 3 / math / scalar reward: successful sibling rollouts are the only implicit
+  feedback. No environment text. This is what we reproduce.
+- Figure 4 / coding / rich feedback: runtime errors, failing tests, LLM judge output.
+
+Our π₁ localized verifier (Layer 2: "V³=2048 correct, ∛2048 ≠ 12") is a valid secondary
+ablation but should not be the primary claim. With scalar-only, SDPO's improvement comes
+purely from the teacher re-evaluating original failed response tokens conditioned on a
+successful sibling — exactly the mechanism the paper claims works for math without rich
+environment feedback. If that improves MATH-500 over GRPO, the story is clean.
+
+The `feedback` field in `compute_score` is still computed (and appears in rollout JSONLs
+for debugging) but is not passed to the trainer in this configuration.
+
+Ablation plan:
+- **A (current)**: scalar-only — `include_environment_feedback=false`
+- **B**: generic feedback — `include_environment_feedback=true`, Layer 1 only
+- **C**: localized verifier — `include_environment_feedback=true`, Layer 2, no solution
+- **D**: localized verifier + solution — full Table 2 template
+
 ### 2026-04-08 — Localized verification feedback (SDPO Figure 4 mechanism)
 
 **Files**: `reward/math_reward.py`, `scripts/train_oneshot_sdpo.slurm`
