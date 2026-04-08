@@ -89,6 +89,11 @@ export PYTHONWARNINGS="ignore:Unsupported processor type"
 # "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
 export TMPDIR=/tmp
 
+# Fix CUDA memory fragmentation: set expandable_segments before CUDA init.
+# At π₁ saturation (~step 11), reprompted sequences grow to ~2000 tokens causing
+# fragmentation in PyTorch's caching allocator → OOM even with free memory available.
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
 # Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
 export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
@@ -164,7 +169,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=8000 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \

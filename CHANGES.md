@@ -13,6 +13,33 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
+### 2026-04-08 — Fix post-saturation OOM; confirmed training working
+
+**Files**: `scripts/train_oneshot_sdpo.slurm`
+
+Run 2 completed steps 1-13 before OOM at step 13 (checkpoint saved at step 10).
+
+**π₁ reward progress confirmed** (exactly as predicted by One-Shot-RLVR paper):
+| Step | π₁ reward | success_group_fraction |
+|------|-----------|----------------------|
+| 1 | 0.043 | 0.23 |
+| 9 | 0.107 | 0.60 |
+| 11 | 0.463 | 0.98 ← saturation begins |
+| 13 | 0.650 | 1.00 ← all groups solved |
+
+**OOM cause**: at saturation, 99% of sequences are reprompted (~2000 tokens vs ~650).
+Teacher forward processes `mini_batch/4GPUs × 2000 tokens = 32000 tokens` → 9.75 GiB
+for `logsumexp`. With only 8.55 GiB free → OOM.
+
+| Parameter | Before | After | Reason |
+|---|---|---|---|
+| `ppo_mini_batch_size` | `64` | `32` | halve sequences/GPU: 32000→16000 tokens |
+| `PYTORCH_CUDA_ALLOC_CONF` | unset | `expandable_segments:True` | fix allocator fragmentation |
+
+Will resume from step 10 checkpoint via `resume_mode=auto`.
+
+---
+
 ### 2026-04-07 — Fix OOM: reduce token budget for SDPO dual-pass
 
 **Files**: `scripts/train_oneshot_sdpo.slurm`
