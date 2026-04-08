@@ -213,6 +213,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
     actor_rollout_ref.actor.self_distillation.distillation_topk=20 \
+    actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
     \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
