@@ -139,10 +139,12 @@ echo "================================================================"
 #      environment_feedback_only_without_solution=true
 #      feedback returns: "V³=2048 correct, ∛2048 ≠ X" when detectable  [Layer 2]
 #
-#   D. Localized verifier + sample solution  ← CURRENT CONFIG
+#   D. Localized verifier + sample solution
 #      include_environment_feedback=true
 #      environment_feedback_only_without_solution=false
 #      Full Table 2 template: solution + localized feedback in reprompt
+#
+# CURRENT CONFIG: condition A (include_environment_feedback=false below)
 #
 # To run condition B: change math_reward.py _make_feedback to skip Layer 2
 #   (comment out the `if data_source == "deepscaler"` block)

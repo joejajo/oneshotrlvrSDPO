@@ -96,7 +96,7 @@ Key differences vs our SDPO implementation:
 |---|---|---|
 | Algorithm | GRPO (`adv_estimator=grpo`) | SDPO (`loss_mode=sdpo` + JSD) |
 | KL loss | `use_kl_loss=True`, coef=0.001 | `use_kl_loss=False` (SDPO uses JSD) |
-| Response length | 3072 | 4096 |
+| Response length | 3072 | 3072 |
 | GPUs | 8 | 4 |
 | max_model_len | not set (old verl) | 8192 |
 | val_kwargs.n | not set | 16 |
