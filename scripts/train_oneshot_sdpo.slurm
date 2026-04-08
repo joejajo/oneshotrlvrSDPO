@@ -121,6 +121,33 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
+# ── Feedback ablation conditions ─────────────────────────────────────────────
+# Four conditions to compare (same checkpoint, prompts, rollout count, seed):
+#
+#   A. Scalar-only baseline
+#      include_environment_feedback=false
+#      (no feedback; pure GRPO-style advantage signal)
+#
+#   B. Generic feedback
+#      include_environment_feedback=true
+#      environment_feedback_only_without_solution=true
+#      feedback returns: "Your answer X is incorrect."  [Layer 1 only]
+#
+#   C. Localized verifier, no solution
+#      include_environment_feedback=true
+#      environment_feedback_only_without_solution=true
+#      feedback returns: "V³=2048 correct, ∛2048 ≠ X" when detectable  [Layer 2]
+#
+#   D. Localized verifier + sample solution  ← CURRENT CONFIG
+#      include_environment_feedback=true
+#      environment_feedback_only_without_solution=false
+#      Full Table 2 template: solution + localized feedback in reprompt
+#
+# To run condition B: change math_reward.py _make_feedback to skip Layer 2
+#   (comment out the `if data_source == "deepscaler"` block)
+# To run condition A: set include_environment_feedback=false below
+# ─────────────────────────────────────────────────────────────────────────────
+
 # ── Launch ────────────────────────────────────────────────────────────────────
 # Config base: ppo_trainer
 #   Using --config-name ppo_trainer (NOT sdpo).
