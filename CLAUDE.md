@@ -173,7 +173,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `policy_loss.loss_mode` | `"vanilla"` | `sdpo` | **Required** for SDPO loss |
 | `self_distillation.success_reward_threshold` | `0.5` (YAML) / `1.0` (docs — docs are wrong, YAML is authoritative) | `1.0` | Binary reward; only perfect = teacher |
 | `self_distillation.include_environment_feedback` | `True` | `true` | Rich π₁ feedback enabled |
-| `self_distillation.environment_feedback_only_without_solution` | `False` | `true` | Use feedback only when teacher has no solution |
+| `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | Paper-faithful: use feedback alongside solution (both in reprompt) |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
 | `self_distillation.max_reprompt_len` | `10240` | `4096` | Caps reprompt + feedback length |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
@@ -283,14 +283,24 @@ return {"score": 0.0, "extracted_answer": model_answer, "feedback": "<π₁ hint
 values into numpy arrays across the batch. Python `bool` becomes `numpy.bool_`,
 which `json.dumps` rejects with `TypeError`. `score=1.0/0.0` encodes correctness.
 
-**`feedback` key**: Minimal, non-revealing signal for failed π₁ rollouts:
-- No `\boxed{}` found → only corrects output format: "Please state your answer as `\boxed{your answer}`" — no math content
-- Wrong answer → `"feedback": ""` (empty) — no hint; the EMA teacher's successful rollout is the real learning signal
+**`feedback` key**: Paper-faithful environment feedback (SDPO Figure 4 / Table 2):
+- No `\boxed{}` found → `"Your previous response did not include a final answer in \boxed{} format. Please state your answer as \boxed{your answer}."` — format correction
+- Wrong answer → `"Your answer {X} is incorrect."` — names the wrong value; math analog of a coding test's `"AssertionError: expected 12.8, got 10"`
 - Correct → `"feedback": ""` (empty)
-- Non-π₁ problems (MATH-500 validation) → `"feedback": ""` (empty)
 
-The feedback is **intentionally non-revealing** — it never leaks the answer, formula, or steps.
-Learning comes from the EMA teacher's demonstration, not from the feedback string.
+With `environment_feedback_only_without_solution=false`, this feedback appears **alongside**
+the teacher's successful demonstration in the reprompt (paper Table 2 full template):
+
+```
+Correct solution: [teacher's correct derivation → \boxed{12.8}]
+The following is feedback from your unsuccessful earlier attempt:
+Your answer 10 is incorrect.
+Correctly solve the original question.
+```
+
+The self-teacher (EMA of student, conditioned on feedback) re-evaluates the original response
+tokens and identifies precisely where the derivation went wrong — per-token credit assignment
+as shown in Figure 4 of the paper.
 
 Grading: extract `\boxed{}` → `grade_answer_mathd` OR `grade_answer_sympy`.
 Both taken verbatim from One-Shot-RLVR `verl/utils/reward_score/utils/utils.py`.

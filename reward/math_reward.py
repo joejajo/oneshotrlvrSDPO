@@ -517,14 +517,24 @@ def extract_answer(passage: str) -> str:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Feedback for failed rollouts
-# Used when include_environment_feedback=true and no EMA teacher solution
-# is available (environment_feedback_only_without_solution=true).
+# Feedback for failed rollouts — paper-faithful environment feedback.
 #
-# Deliberately non-revealing: no answer values, no computation steps.
-# The real learning signal comes from the EMA teacher's successful rollouts
-# shown as demonstrations. Feedback here only corrects output format (missing
-# \boxed{}) or signals incorrectness without leaking any solution content.
+# Matches the SDPO paper (arXiv:2601.20802) Figure 4 / Table 2:
+#   feedback f is the environment's signal about what went wrong.
+#   For coding: runtime error / failing test output.
+#   For math: "Your answer X is incorrect." — concise, factual, no hint.
+#
+# Used by SDPO ray_trainer when include_environment_feedback=true.
+# With environment_feedback_only_without_solution=false, this feedback
+# appears alongside the teacher's successful demonstration in the reprompt:
+#
+#   Correct solution: [teacher's correct derivation → 12.8]
+#   The following is feedback from your unsuccessful earlier attempt:
+#   Your answer 10 is incorrect.
+#   Correctly solve the original question.
+#
+# This gives the model both: what the right answer looks like (solution)
+# and confirmation that its specific attempt was wrong (feedback).
 # ---------------------------------------------------------------------------
 
 _FEEDBACK_NO_BOXED = (
@@ -532,12 +542,16 @@ _FEEDBACK_NO_BOXED = (
     "Please state your answer as \\boxed{your answer}."
 )
 
-_FEEDBACK_WRONG = ""   # empty: EMA teacher demonstration carries the signal
 
+def _make_feedback(no_boxed: bool, model_answer: str = "") -> str:
+    """Return environment feedback for a failed rollout.
 
-def _make_feedback(no_boxed: bool) -> str:
-    """Return minimal non-revealing feedback for a failed rollout."""
-    return _FEEDBACK_NO_BOXED if no_boxed else _FEEDBACK_WRONG
+    no_boxed=True  → format error: nudge to use \\boxed{}
+    no_boxed=False → wrong answer: report which answer was incorrect
+    """
+    if no_boxed:
+        return _FEEDBACK_NO_BOXED
+    return f"Your answer {model_answer} is incorrect."
 
 
 def compute_score(
@@ -597,7 +611,7 @@ def compute_score(
         return {
             "score": 0.0,
             "extracted_answer": model_answer,
-            "feedback": _make_feedback(no_boxed=False),
+            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer),
         }
 
     for gt in processed_ground_truths:
@@ -608,7 +622,7 @@ def compute_score(
     return {
         "score": 0.0,
         "extracted_answer": model_answer,
-        "feedback": _make_feedback(no_boxed=False),
+        "feedback": _make_feedback(no_boxed=False, model_answer=model_answer),
     }
 
 
@@ -623,10 +637,11 @@ if __name__ == "__main__":
     assert r["feedback"] == "", f"Expected empty feedback on correct, got {r['feedback']}"
     assert "is_correct" not in r, "is_correct must not appear (causes numpy.bool_ serialization error)"
 
-    # Wrong answer — non-revealing feedback (no answer values)
+    # Wrong answer — feedback reports the student's wrong answer (paper Figure 4 style)
     r = compute_score("lighteval/MATH", "\\boxed{15}", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert "12.8" not in r["feedback"], f"Feedback must not reveal answer, got {r['feedback']}"
+    assert "15" in r["feedback"], f"Feedback should name the wrong answer, got {r['feedback']}"
+    assert r["feedback"] == "Your answer 15 is incorrect.", f"Unexpected feedback: {r['feedback']}"
 
     # No \boxed{} at all
     r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8")

@@ -13,6 +13,36 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
+### 2026-04-08 — Paper-faithful feedback mechanism (SDPO Figure 4)
+
+**Files**: `reward/math_reward.py`, `scripts/train_oneshot_sdpo.slurm`
+
+Implemented the environment feedback mechanism exactly as described in the SDPO paper
+(arXiv:2601.20802, Figure 4 / Table 2):
+
+1. **`reward/math_reward.py`**: Changed `_FEEDBACK_WRONG = ""` to
+   `f"Your answer {model_answer} is incorrect."` — math analog of a coding test's
+   `"AssertionError: expected 12.8, got 10"`. Specific, factual, no correct-answer hint.
+
+2. **`train_oneshot_sdpo.slurm`**: Changed `environment_feedback_only_without_solution`
+   from `true` → `false`. Paper Table 2 full template uses BOTH the solution AND the
+   feedback simultaneously in the reprompt:
+   ```
+   Correct solution: [teacher's correct derivation]
+   The following is feedback from your unsuccessful earlier attempt:
+   Your answer 10 is incorrect.
+   Correctly solve the original question.
+   ```
+   Previously we suppressed feedback when a solution existed — that was a conservative
+   departure from the paper. Now we use both together.
+
+**Effect on reprompting**: At step 12 (~50% success), failed rollout that answered `10`
+now sees: correct solution (12.8 derivation) + "Your answer 10 is incorrect." The
+self-teacher conditions on both and assigns per-token credit to the original response,
+identifying the token(s) where the cube root calculation went wrong.
+
+---
+
 ### 2026-04-08 — Fix post-saturation OOM; confirmed training working
 
 **Files**: `scripts/train_oneshot_sdpo.slurm`
