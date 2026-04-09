@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=oneshot_sdpo
+#SBATCH --job-name=oneshot_sdpo_nofb
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
@@ -25,8 +25,8 @@ EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
 
 REWARD_PATH=${ONESHOT_DIR}/reward/math_reward.py
 CKPT_DIR=${OUTPUT_ROOT}/checkpoints
-ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts
-TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts
+ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts_nofb
+TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts_nofb
 
 # ── Environment ───────────────────────────────────────────────────────────────
 # No conda or module load needed — runtime is supplied by the Apptainer container.
@@ -113,7 +113,7 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  One-Shot-RLVR + SDPO training"
+echo "  One-Shot-RLVR + SDPO training  [NO RICH FEEDBACK — condition A]"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -125,54 +125,27 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
-# ── Feedback ablation conditions ─────────────────────────────────────────────
-# Four conditions to compare (same checkpoint, prompts, rollout count, seed):
+# ── No rich feedback — SDPO Section 3 scalar setting ─────────────────────────
 #
-#   A. Scalar-only baseline
-#      include_environment_feedback=false
-#      (no feedback; pure GRPO-style advantage signal)
+# include_environment_feedback=false
 #
-#   B. Generic feedback
-#      include_environment_feedback=true
-#      environment_feedback_only_without_solution=true
-#      feedback returns: "Your answer X is incorrect."  [Layer 1 only]
+# The environment returns only a scalar reward (1 or 0).  There is no text
+# feedback: no "Your answer X is incorrect", no localized verifier hint,
+# no sample solution in the reprompt.
 #
-#   C. Localized verifier, no solution
-#      include_environment_feedback=true
-#      environment_feedback_only_without_solution=true
-#      feedback returns: "V³=2048 correct, ∛2048 ≠ X" when detectable  [Layer 2]
+# SDPO still runs fully: the EMA teacher reprompts failed rollouts using a
+# *successful sibling rollout* from the same group of 8 as the implicit
+# demonstration.  The teacher re-processes [question + sibling solution] and
+# assigns per-token credit to that sequence, which the student distils via
+# reverse KL (alpha=1.0).  The scalar reward drives the GRPO advantage; the
+# distillation loss provides token-level supervision on HOW the correct answer
+# was reached — all without any text hint about what went wrong.
 #
-#   D. Localized verifier + sample solution
-#      include_environment_feedback=true
-#      environment_feedback_only_without_solution=false
-#      Full Table 2 template: solution + localized feedback in reprompt
-#
-# CURRENT CONFIG: condition D (include_environment_feedback=true, with solution)
-#   See train_oneshot_sdpo_nofeedback.slurm for condition A (scalar-only).
-#
-# To run condition B: change math_reward.py _make_feedback to skip Layer 2
-#   (comment out the `if data_source == "deepscaler"` block)
+# This is condition A in our ablation (see train_oneshot_sdpo.slurm for B/C/D).
+# It matches the SDPO paper Section 3 math/scalar-reward regime exactly.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
-# Config base: ppo_trainer
-#   Using --config-name ppo_trainer (NOT sdpo).
-#   sdpo.yaml inherits user.yaml which requires TASK and EXPERIMENT env vars
-#   specific to the CSCS cluster. ppo_trainer.yaml is cluster-neutral.
-#   All SDPO-specific keys are set explicitly below.
-#
-# SDPO keys (absent from ppo_trainer.yaml, must be set explicitly):
-#   actor_rollout_ref.actor.policy_loss.loss_mode=sdpo
-#   algorithm.adv_estimator=grpo
-#   algorithm.norm_adv_by_std_in_grpo=False
-#   algorithm.rollout_correction.rollout_is=token
-#   algorithm.rollout_correction.rollout_is_threshold=2.0
-#   actor_rollout_ref.rollout.calculate_log_probs=True
-#   actor_rollout_ref.actor.self_distillation.*
-#
-# val_kwargs: pre-declared in rollout.yaml with correct defaults
-#   (temperature=0, n=1, do_sample=False) — no override needed.
-
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
 
 apptainer exec --nv \
@@ -210,8 +183,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.entropy_coeff=0.001 \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
-    actor_rollout_ref.actor.self_distillation.include_environment_feedback=true \
-    actor_rollout_ref.actor.self_distillation.environment_feedback_only_without_solution=false \
+    actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
@@ -252,7 +224,7 @@ apptainer exec --nv \
     trainer.test_freq=25 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1 \
+    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_nofb \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.resume_mode=disable \
