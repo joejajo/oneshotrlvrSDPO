@@ -42,7 +42,10 @@ export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 
 # Make reward module and verl importable inside the container.
 SDPO_DIR=${PROJECT_ROOT}/SDPO
-export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
+# pkgs/ holds packages not in the container (latex2sympy2, regex).
+# Install once with: pip install --target=${PROJECT_ROOT}/pkgs latex2sympy2 regex
+PKGS_DIR=${PROJECT_ROOT}/pkgs
+export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PKGS_DIR}:${PYTHONPATH:-}"
 
 # Container ships its own CUDA at /usr/local/cuda — use that as fallback.
 # Do NOT call "module load cuda" here; modules are unavailable inside Apptainer.
