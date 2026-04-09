@@ -207,9 +207,11 @@ apptainer exec --nv \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=6000 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.actor.entropy_coeff=0.001 \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
-    actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
+    actor_rollout_ref.actor.self_distillation.include_environment_feedback=true \
+    actor_rollout_ref.actor.self_distillation.environment_feedback_only_without_solution=false \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
