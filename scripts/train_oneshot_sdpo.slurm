@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=oneshot_sdpo
 #SBATCH --partition=a100
-#SBATCH --gres=gpu:a100:4
+#SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
@@ -93,7 +93,7 @@ export TMPDIR=/tmp
 # π₁ saturation (~step 11). Removed because vLLM v1's CuMemAllocator explicitly
 # forbids it: "Expandable segments are not compatible with memory pool"
 # (vllm/device_allocator/cumem.py). OOM fragmentation is now mitigated solely by
-# ppo_mini_batch_size=32 (halved from 64), which keeps peak logit memory ~4.87 GB/GPU.
+# ppo_mini_batch_size=16 (halved again for 2-GPU run), which keeps peak logit memory ~4.87 GB/GPU.
 
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
 # Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
@@ -199,7 +199,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=16 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=6000 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
@@ -239,7 +239,7 @@ apptainer exec --nv \
     custom_reward_function.name=compute_score \
     \
     'trainer.logger=["console","tensorboard"]' \
-    trainer.n_gpus_per_node=4 \
+    trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_training_steps=1200 \
     trainer.save_freq=10 \
