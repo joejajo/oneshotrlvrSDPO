@@ -550,36 +550,45 @@ def grade_answer_grader(given_answer: str, ground_truth: str) -> bool:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Feedback for failed rollouts — two-layer design.
+# Feedback for failed rollouts — four-layer verifier design.
 #
-# Layer 1 — Generic (all math problems):
+# The feedback string is SDPO's environment_output f_i.  It is placed into
+# the self-teacher prompt alongside the original question and (optionally) a
+# correct sibling rollout, then the original failed response is appended so
+# the teacher re-evaluates the old trajectory under feedback-augmented
+# context — NOT to generate a fresh answer (SDPO §3).
+#
+# Layer 1 — Generic (all problems):
 #   "Your answer X is incorrect."
-#   Works universally. Names the wrong value; tells the self-teacher which
-#   specific token(s) to disagree with. Does not reveal the correct answer.
+#   Minimal but names the wrong token so the teacher knows where to disagree.
 #
-# Layer 2 — Dataset-specific verifier (π₁ only, data_source="deepscaler"):
-#   When a verifiable correct intermediate is detected in the response text,
-#   returns a localized diagnostic rather than a global incorrect signal.
-#   Rule: if "2048" appears in the response, the model reached the correct
-#   intermediate V³=2048 but took a wrong cube root.
-#   → "V³ = 2048 is correct, but ∛2048 ≠ {answer}. Re-check cube root step."
-#   This is grounded in the verifier (the intermediate IS checkable), not in
-#   teacher reasoning. It changes the teacher's distribution near the cube-root
-#   tokens while leaving the V³ setup tokens uncontradicted — sparse blame,
-#   matching SDPO Figure 4.
+# Layer 2a — π₁ verifier (data_source="deepscaler"):
+#   Intermediate V³=2048 is checkable.  Localises blame to cube-root tokens.
+#   → "V³=2048 is correct, but ∛2048 ≠ X. Re-check the cube root step."
+#   Does NOT reveal the correct answer.
 #
-#   Deliberately NOT included:
-#   - The original formula P = k·A·V³ (reveals problem structure)
-#   - The correct answer 12.8 (would make this a solution hint)
-#   - Equation substitution P = {computed} ≠ 32 (too problem-specific)
-#   If no verifiable intermediate is detected, falls back to generic Layer 1.
+# Layer 2b — Unit-ratio mismatch (all numeric answers):
+#   If model_answer / ground_truth matches a known unit-conversion factor
+#   (60=min↔hr, 1000=kilo, 12=inch↔ft, …) emit a compact unit diagnostic.
+#   → "Your answer X is incorrect; this may be a minutes↔hours unit mismatch."
+#   Uses ground_truth only to compute the ratio — answer not revealed.
 #
-# Ablation conditions (vary include_environment_feedback and feedback content):
-#   A. Scalar-only baseline:   include_environment_feedback=false
-#   B. Generic feedback:       include_environment_feedback=true, return generic_fb
-#   C. Localized verifier:     include_environment_feedback=true, full _make_feedback
-#   D. Localized + solution:   condition C + environment_feedback_only_without_solution=false
-#   Current slurm config runs condition D (most paper-faithful).
+# Layer 2c — Arithmetic transcription error:
+#   Looks for "= <number>" statements in the response tail that differ from
+#   the boxed answer, flagging copy-paste mistakes between steps.
+#   → "You stated = 48 but boxed 84; check for a transcription error."
+#
+# Layer 2d — Wrong quantity context:
+#   Finds the last quantity keyword (speed, time, distance, …) mentioned
+#   before \boxed{} to surface "solved for the wrong variable" errors.
+#   → "Your answer X is incorrect. You appear to have computed speed;
+#      check which quantity the question asks for."
+#
+# Ablation conditions (slurm script):
+#   A. Scalar-only:   include_environment_feedback=false   ← current primary
+#   B. Generic:       include_environment_feedback=true, Layer 1 only
+#   C. Full verifier: include_environment_feedback=true, all layers
+#   D. Verifier + solution: condition C + successful sibling in prompt
 # ---------------------------------------------------------------------------
 
 _FEEDBACK_NO_BOXED = (
@@ -587,38 +596,146 @@ _FEEDBACK_NO_BOXED = (
     "Please state your answer as \\boxed{your answer}."
 )
 
+# Known unit-conversion ratios that produce wrong answers when missed.
+# (factor, human-readable description)  — checked as ratio AND its inverse.
+_UNIT_RATIO_HINTS = [
+    (60,    "this may be a minutes \u2194 hours unit mismatch"),
+    (3600,  "this may be a seconds \u2194 hours unit mismatch"),
+    (1000,  "this may be a kilo-unit mismatch (e.g. g\u2194kg, m\u2194km)"),
+    (100,   "this may be a centi-unit or percentage mismatch (e.g. cm\u2194m)"),
+    (12,    "this may be an inches \u2194 feet unit mismatch"),
+    (5280,  "this may be a feet \u2194 miles unit mismatch"),
+    (2.54,  "this may be a centimetres \u2194 inches unit mismatch"),
+]
+
+# Quantity keywords searched (in reverse) near \boxed{} in the response.
+_QUANTITY_KEYWORDS = [
+    ("speed",       "speed"),
+    ("velocity",    "velocity"),
+    ("rate",        "rate"),
+    ("time",        "time"),
+    ("duration",    "duration or time"),
+    ("distance",    "distance"),
+    ("length",      "length or distance"),
+    ("height",      "height"),
+    ("width",       "width"),
+    ("depth",       "depth"),
+    ("area",        "area"),
+    ("volume",      "volume"),
+    ("pressure",    "pressure"),
+    ("force",       "force"),
+    ("mass",        "mass"),
+    ("weight",      "mass or weight"),
+    ("work",        "work or energy"),
+    ("energy",      "energy"),
+    ("cost",        "cost"),
+    ("profit",      "profit"),
+    ("revenue",     "revenue"),
+    ("probability", "probability"),
+    ("angle",       "angle"),
+    ("perimeter",   "perimeter"),
+    ("radius",      "radius"),
+    ("diameter",    "diameter"),
+]
+
+
+def _detect_unit_ratio_hint(model_answer: str, ground_truth: str) -> str:
+    """Layer 2b: return a unit-mismatch hint if answer/gt ratio matches a known factor."""
+    try:
+        m = float(model_answer)
+        g = float(ground_truth)
+        if g == 0 or m == 0:
+            return ""
+        ratio = m / g
+        for factor, hint in _UNIT_RATIO_HINTS:
+            if abs(ratio - factor) / factor < 0.02:
+                return hint
+            inv = 1.0 / factor
+            if abs(ratio - inv) / inv < 0.02:
+                return hint
+    except (ValueError, TypeError, ZeroDivisionError):
+        pass
+    return ""
+
+
+def _detect_quantity_context(solution_str: str) -> str:
+    """Layer 2d: return the quantity the model claims to have computed from context near \\boxed{}."""
+    idx = solution_str.rfind("\\boxed")
+    if idx < 0:
+        return ""
+    context = solution_str[max(0, idx - 300):idx].lower()
+    best_pos, best_label = -1, ""
+    for kw, label in _QUANTITY_KEYWORDS:
+        pos = context.rfind(kw)
+        if pos > best_pos:
+            best_pos, best_label = pos, label
+    return best_label
+
+
+def _detect_arithmetic_inconsistency(solution_str: str, model_answer: str) -> str:
+    """Layer 2c: flag a stated numeric result in the response that conflicts with the boxed answer."""
+    try:
+        m_val = float(model_answer)
+        idx = solution_str.rfind("\\boxed")
+        tail = solution_str[max(0, idx - 600):idx] if idx > 0 else solution_str[-600:]
+        # Match "= <number>" at line/clause boundaries
+        matches = re.findall(r'=\s*([-+]?\d+(?:\.\d+)?)\s*(?:\n|$|[,;.]|\s)', tail)
+        for match in reversed(matches):
+            val = float(match)
+            if abs(val) > 1e-9 and abs(val - m_val) / max(abs(m_val), 1.0) > 0.01:
+                return (f"You stated = {match} but wrote \\boxed{{{model_answer}}}; "
+                        f"check for a transcription error between steps.")
+    except (ValueError, TypeError):
+        pass
+    return ""
+
 
 def _make_feedback(no_boxed: bool, model_answer: str = "", data_source: str = "",
-                   solution_str: str = "") -> str:
-    """Return environment feedback for a failed rollout.
+                   solution_str: str = "", ground_truth: str = "") -> str:
+    """Return environment feedback for a failed rollout (SDPO environment_output f_i).
 
-    Layer 1 (generic, all problems): "Your answer X is incorrect."
-    Layer 2 (verifier, pi1 only):    localized cube-root diagnostic if V³=2048 detected.
+    Layer 1  — generic:           "Your answer X is incorrect."
+    Layer 2a — π₁ verifier:       cube-root diagnostic when V³=2048 detected.
+    Layer 2b — unit ratio:        compact hint when answer/gt matches unit factor.
+    Layer 2c — arithmetic check:  flags stated value ≠ boxed answer.
+    Layer 2d — quantity context:  names the quantity the model solved for.
     """
     if no_boxed:
         return _FEEDBACK_NO_BOXED
 
-    # Layer 1 — generic, works for all math problems.
     generic_fb = (f"Your answer {model_answer} is incorrect."
                   if model_answer else "Your answer is incorrect.")
 
-    # Layer 2 — π₁ verifier (data_source="deepscaler" only).
-    # Only activates when a verifiable correct intermediate is found in the
-    # response text. Falls back to generic if nothing is detectable.
-    # Does NOT reveal the correct answer or the original formula.
-    if data_source == "deepscaler" and model_answer:
+    if not model_answer:
+        return generic_fb
+
+    # Layer 2a — π₁ specific verifier
+    if data_source == "deepscaler":
         try:
-            float(model_answer)  # skip non-numeric answers
+            float(model_answer)
             if "2048" in solution_str:
-                # Model derived V³ = 2048 correctly but took a wrong cube root.
-                # Localizes disagreement to the cube-root tokens only.
-                return (
-                    f"V\u00b3 = 2048 is correct, but \u221b2048 \u2260 {model_answer}. "
-                    f"Re-check the cube root step."
-                )
-            # No verifiable intermediate detected — generic is sufficient.
+                return (f"V\u00b3 = 2048 is correct, but \u221b2048 \u2260 {model_answer}. "
+                        f"Re-check the cube root step.")
         except (ValueError, TypeError):
             pass
+
+    # Layer 2b — unit ratio mismatch (uses ground_truth for ratio only, answer not revealed)
+    if ground_truth:
+        ratio_hint = _detect_unit_ratio_hint(model_answer, ground_truth)
+        if ratio_hint:
+            return f"Your answer {model_answer} is incorrect; {ratio_hint}."
+
+    # Layer 2c — arithmetic transcription error
+    arith_hint = _detect_arithmetic_inconsistency(solution_str, model_answer)
+    if arith_hint:
+        return arith_hint
+
+    # Layer 2d — wrong quantity context
+    quantity = _detect_quantity_context(solution_str)
+    if quantity:
+        return (f"Your answer {model_answer} is incorrect. "
+                f"You appear to have computed {quantity}; "
+                f"check which quantity the question asks for.")
 
     return generic_fb
 
@@ -681,8 +798,12 @@ def compute_score(
             "score": 0.0,
             "extracted_answer": model_answer,
             "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
-                                       data_source=data_source, solution_str=solution_str),
+                                       data_source=data_source, solution_str=solution_str,
+                                       ground_truth=""),
         }
+
+    # Use first processed ground truth for feedback diagnostics (ratio, unit checks).
+    primary_gt = processed_ground_truths[0]
 
     for gt in processed_ground_truths:
         is_correct = (grade_answer_mathd(model_answer, gt)
@@ -695,7 +816,8 @@ def compute_score(
         "score": 0.0,
         "extracted_answer": model_answer,
         "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
-                                   data_source=data_source, solution_str=solution_str),
+                                   data_source=data_source, solution_str=solution_str,
+                                   ground_truth=primary_gt),
     }
 
 
