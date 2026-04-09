@@ -509,6 +509,39 @@ def extract_answer(passage: str) -> str:
 # END verbatim One-Shot-RLVR code
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# grader.py — math_equal() as third grading fallback
+# Source: pipeline_files/grader.py (from One-Shot-RLVR evaluation toolkit)
+# Handles cases grade_answer_mathd and grade_answer_sympy both miss:
+#   - numeric closeness (rel_tol=1e-4), percentage equivalence
+#   - matrix equality, equation forms, latex2sympy parsing
+# Gracefully disabled if latex2sympy2 or regex are not installed.
+# ---------------------------------------------------------------------------
+try:
+    from reward.grader import math_equal as _math_equal
+    _GRADER_AVAILABLE = True
+except Exception:
+    try:
+        import importlib.util, os as _os
+        _grader_path = _os.path.join(_os.path.dirname(__file__), "grader.py")
+        _spec = importlib.util.spec_from_file_location("grader", _grader_path)
+        _grader_mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_grader_mod)
+        _math_equal = _grader_mod.math_equal
+        _GRADER_AVAILABLE = True
+    except Exception:
+        _GRADER_AVAILABLE = False
+
+
+def grade_answer_grader(given_answer: str, ground_truth: str) -> bool:
+    """Third fallback: math_equal from grader.py (numeric + symbolic + latex2sympy)."""
+    if not _GRADER_AVAILABLE:
+        return False
+    try:
+        return bool(_math_equal(given_answer, ground_truth, timeout=False))
+    except Exception:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # SDPO custom reward wrapper
@@ -652,7 +685,9 @@ def compute_score(
         }
 
     for gt in processed_ground_truths:
-        is_correct = grade_answer_mathd(model_answer, gt) or grade_answer_sympy(model_answer, gt)
+        is_correct = (grade_answer_mathd(model_answer, gt)
+                      or grade_answer_sympy(model_answer, gt)
+                      or grade_answer_grader(model_answer, gt))
         if is_correct:
             return {"score": 1.0, "extracted_answer": model_answer, "feedback": ""}
 

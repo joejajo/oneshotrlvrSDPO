@@ -45,6 +45,7 @@ _spec.loader.exec_module(_mod)
 extract_answer = _mod.extract_answer
 grade_answer_mathd = _mod.grade_answer_mathd
 grade_answer_sympy = _mod.grade_answer_sympy
+grade_answer_grader = _mod.grade_answer_grader
 
 
 def resolve_checkpoint(ckpt_path: str) -> str:
@@ -61,8 +62,9 @@ def resolve_checkpoint(ckpt_path: str) -> str:
 
 
 def grade(model_answer: str, ground_truth: str) -> bool:
-    return grade_answer_mathd(model_answer, ground_truth) or \
-           grade_answer_sympy(model_answer, ground_truth)
+    return (grade_answer_mathd(model_answer, ground_truth)
+            or grade_answer_sympy(model_answer, ground_truth)
+            or grade_answer_grader(model_answer, ground_truth))
 
 
 def build_prompts(df: pd.DataFrame) -> list[str]:
