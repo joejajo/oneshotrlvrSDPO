@@ -242,11 +242,74 @@ is not a string — fell through to `np.mean([None, ...])` → TypeError.
 
 ---
 
+---
+
+### 2026-04-10 — grader.py integrated; four-layer verifier; entropy; condition D; OOM fixes; epoch bug fixed
+
+**Files**: `reward/math_reward.py`, `reward/grader.py`, `eval/eval_math500.py`,
+`scripts/train_oneshot_sdpo.slurm`, `scripts/train_oneshot_sdpo_nofeedback.slurm` (new)
+
+#### 1. grader.py — third grading fallback
+Copied `pipeline_files/grader.py` to `reward/grader.py`. Provides `math_equal()` using
+`latex2sympy2`, `regex`, numeric tolerance, and matrix equality. Integrated as a third
+fallback in `math_reward.py` and `eval/eval_math500.py`:
+`grade_answer_mathd → grade_answer_sympy → grade_answer_grader`
+
+Requires `latex2sympy2` + `regex` not in container → installed to `pkgs/` at
+`/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/pkgs` via `pip install --target`.
+PYTHONPATH updated in both slurm scripts to include `${PROJECT_ROOT}/pkgs`.
+
+#### 2. Four-layer verifier in `_make_feedback()`
+Replaced two-tier feedback with four-layer verifier for π₁:
+- Layer 0: no `\boxed{}` → format nudge
+- Layer 1: generic wrong answer
+- Layer 2a: cube-root error ("V³=2048 correct, ∛2048 ≠ X")
+- Layer 2b: unit/ratio hint (`_UNIT_RATIO_HINTS` pattern matching)
+- Layer 2c: arithmetic inconsistency detection
+- Layer 2d: wrong quantity context
+
+`_make_feedback()` now accepts `ground_truth` parameter.
+
+#### 3. Entropy regularization
+Added `actor_rollout_ref.actor.entropy_coeff=0.001` matching One-Shot-RLVR's
+`kl_loss_coef=0.001`. Entropy bonus applied on top of distillation loss at
+`dp_actor.py:881-886`.
+
+#### 4. Condition D (rich feedback) — now primary
+Switched from condition A to condition D:
+- `include_environment_feedback=true`
+- `environment_feedback_only_without_solution=false`
+Both sibling solution AND verifier text in teacher reprompt.
+Separate `train_oneshot_sdpo_nofeedback.slurm` added for condition A comparison.
+
+#### 5. OOM / crash fixes
+- `reprompt_truncation=left`: default "error" crashes when reprompt > 2048 tokens
+- `ppo_max_token_len_per_gpu=4096` (was 6000): teacher sequences up to 5120 tokens
+  (truncated_prompt 2048 + response 3072); reduced bin ceiling prevents silent OOM
+
+#### 6. Epoch loop bug — training stopped at 30 steps
+`ppo_trainer.yaml` default `total_epochs=30`. With 128-row dataset and
+`train_batch_size=128`, `len(train_dataloader)=1`. The outer epoch loop
+`for epoch in range(0, total_epochs)` exhausts after 30 steps regardless of
+`total_training_steps=1200`. Fixed: `trainer.total_epochs=9999`.
+
+Observed: first run stopped at step 30 (SLURM killed near epoch-loop exhaustion).
+Checkpoint at `global_step_20` exists; rich-feedback script uses `resume_mode=auto`.
+
+#### 7. Steps and timing
+Measured ~579s/step on 2×A100. At 16h: ~99 steps max → `total_training_steps=90`.
+At step 30: `critic/score/mean=0.68`, all groups have successful sibling,
+`num_turns/mean=2.0` (reprompting active).
+
+---
+
 ## Current State
 
 - **Branch**: `claude/integrate-rlvr-sdpo-dlMU5`
-- **Status**: Ready to submit production job
-- **Command**: `sbatch scripts/train_oneshot_sdpo.slurm`
-- **Config**: 4× A100-40GB, 500 steps, train_batch=128, rollout.n=8, 16h wall time
-- **Known working**: smoke test (1 step, 1 GPU) passes with all fixes applied
-- **Not yet tested**: full 500-step run with new hyperparams (alpha=1.0, rate=0.01, topk=20)
+- **Status**: Ready to resubmit
+- **Commands**:
+  - `sbatch scripts/train_oneshot_sdpo.slurm` — condition D, resumes from global_step_20, runs steps 21–90
+  - `sbatch scripts/train_oneshot_sdpo_nofeedback.slurm` — condition A, fresh run, steps 1–90
+- **Config**: 2× A100-40GB, 90 steps, train_batch=128, rollout.n=8, 16h wall time
+- **Measured timing**: ~579s/step (~9.7 min); 90 steps ≈ 14.6h
+- **Checkpoint available**: `output/checkpoints/global_step_20` (from first run)

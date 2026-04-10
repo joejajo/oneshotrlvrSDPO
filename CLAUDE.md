@@ -96,12 +96,14 @@ Key differences vs our SDPO implementation:
 |---|---|---|
 | Algorithm | GRPO (`adv_estimator=grpo`) | SDPO (`loss_mode=sdpo` + JSD) |
 | KL loss | `use_kl_loss=True`, coef=0.001 | `use_kl_loss=False` (SDPO uses JSD) |
+| Entropy | not set | `entropy_coeff=0.001` |
 | Response length | 3072 | 3072 |
-| GPUs | 8 | 4 |
+| GPUs | 8 | 2 |
 | max_model_len | not set (old verl) | 8192 |
-| val_kwargs.n | not set | 16 |
+| val_kwargs.n | not set | 1 |
 | Reprompting | N/A | EMA teacher reprompts failed rollouts |
-| Teacher | N/A (ref model) | EMA of student (update_rate=0.05) |
+| Teacher | N/A (ref model) | EMA of student (update_rate=0.01) |
+| Feedback | N/A | condition D: sibling solution + verifier text |
 
 ---
 
@@ -162,8 +164,10 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `algorithm.adv_estimator` | `gae` | `grpo` | SDPO requires grpo (no critic) |
 | `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` | SDPO paper; JSD dominates gradient |
 | `trainer.logger` | `["console","wandb"]` | `["console","tensorboard"]` | No W&B on HPC |
-| `trainer.n_gpus_per_node` | `8` | `4` | Our A100 allocation |
-| `trainer.total_epochs` | `30` | — (use `total_training_steps=500`) | Step-based for one-shot data |
+| `trainer.n_gpus_per_node` | `8` | `2` | Our A100 allocation |
+| `trainer.total_epochs` | `30` | `9999` | **Critical**: with 128-row dataset and batch_size=128, len(dataloader)=1 → epoch loop exits after 30 steps, ignoring total_training_steps. 9999 makes epoch loop infinite so total_training_steps controls termination |
+| `trainer.total_training_steps` | `null` | `90` | 16h ÷ ~579s/step (measured) ≈ 99 steps; 90 for safety |
+| `trainer.resume_mode` | `disable` | `auto` (rich-feedback), `disable` (no-feedback) | Resume from global_step_20 checkpoint for rich-feedback run |
 | `trainer.val_before_train` | `True` | `True` | Keep baseline measurement |
 
 ### actor/actor.yaml defaults → our overrides
@@ -172,10 +176,11 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 |---|---|---|---|
 | `policy_loss.loss_mode` | `"vanilla"` | `sdpo` | **Required** for SDPO loss |
 | `self_distillation.success_reward_threshold` | `0.5` (YAML) / `1.0` (docs — docs are wrong, YAML is authoritative) | `1.0` | Binary reward; only perfect = teacher |
-| `self_distillation.include_environment_feedback` | `True` | `false` | **Condition A (primary)**: scalar-only, matches SDPO paper Section 3 math regime — successful sibling rollouts are the only implicit feedback, no environment text |
-| `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | N/A when include_environment_feedback=false |
+| `self_distillation.include_environment_feedback` | `True` | `true` | **Condition D (current)**: rich feedback — sibling solution + verifier text |
+| `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | Include solution in reprompt (condition D) |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
-| `self_distillation.max_reprompt_len` | `10240` | `4096` | Caps reprompt + feedback length |
+| `self_distillation.max_reprompt_len` | `10240` | `2048` | Caps reprompt length; truncation_side=left prevents crash |
+| `self_distillation.reprompt_truncation` | `"error"` | `left` | **Critical**: default "error" crashes when reprompt > max_reprompt_len; "left" truncates silently |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
 | `self_distillation.distillation_topk` | `100` | `20` | Matches SDPO rich_feedback experiments; less compute |
 | `self_distillation.alpha` | `0.5` | `1.0` | Pure reverse KL (mode-seeking); matches SDPO rich_feedback experiments |
@@ -184,7 +189,9 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.is_clip` | `2` | `2.0` | Same as default |
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
-| `ppo_mini_batch_size` | `256` | `128` | 4 GPUs, match per-GPU load |
+| `entropy_coeff` | `0` | `0.001` | Entropy bonus matching One-Shot-RLVR's KL coeff; prevents collapse |
+| `ppo_mini_batch_size` | `256` | `16` | 2 GPUs; keeps peak logit memory safe |
+| `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences up to 5120 tokens; 4096 bin ceiling prevents silent OOM |
 | `optim.lr` | `1e-6` | `1e-6` | Same as default |
 | `optim.lr_warmup_steps` | `-1` | `10` | Brief warmup for one-shot |
 
@@ -198,7 +205,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `n` | `1` | `8` | 8 rollouts per prompt |
 | `val_kwargs.n` | `1` | `1` | Greedy pass@1 (n=16 too expensive on 500 problems) |
 | `temperature` | `1.0` | `0.6` | Qwen2.5-Math-1.5B recommended |
-| `gpu_memory_utilization` | `0.5` | `0.6` | Safe for hybrid actor+vLLM on A100-40GB |
+| `gpu_memory_utilization` | `0.5` | `0.4` | Safe for hybrid actor+vLLM on 2×A100-40GB |
 | `tensor_model_parallel_size` | `2` | `1` | 1.5B model fits on 1 GPU |
 
 ### sdpo.yaml (SDPO cluster config, NOT used directly)
@@ -283,29 +290,37 @@ return {"score": 0.0, "extracted_answer": model_answer, "feedback": "<π₁ hint
 values into numpy arrays across the batch. Python `bool` becomes `numpy.bool_`,
 which `json.dumps` rejects with `TypeError`. `score=1.0/0.0` encodes correctness.
 
-**`feedback` key**: `compute_score` returns a `feedback` string, but for the primary
-experiment (`include_environment_feedback=false`, condition A) it is **not consumed** by
-SDPO — the trainer ignores it and uses only the scalar reward + sibling solutions.
+**Grading chain** (three fallbacks, all must fail before score=0):
+1. `grade_answer_mathd` — fast string normalisation (from One-Shot-RLVR utils)
+2. `grade_answer_sympy` — sympy symbolic equality
+3. `grade_answer_grader` — `math_equal()` from `reward/grader.py` (numeric tolerance, latex2sympy2, matrix equality); requires `latex2sympy2` + `regex` installed to `pkgs/`
 
-The feedback strings are still computed and appear in the rollout JSONL for debugging:
-- No `\boxed{}` found → format correction nudge
-- Wrong answer (π₁, "2048" in response) → `"V³ = 2048 is correct, but ∛2048 ≠ {X}. Re-check cube root."` (Layer 2 verifier)
-- Wrong answer (all others) → `"Your answer {X} is incorrect."` (Layer 1 generic)
-- Correct → `""` (empty)
+**`feedback` key** (condition D — currently active):
+`compute_score` returns a `feedback` string consumed by SDPO's reprompt template.
+Four-layer verifier in `_make_feedback()`:
+- **Layer 0**: no `\boxed{}` → format nudge
+- **Layer 1**: generic wrong answer → `"Your answer {X} is incorrect."`
+- **Layer 2a** (π₁ only, response contains "2048"): cube-root error → `"V³ = 2048 is correct, but ∛2048 ≠ {X}. Re-check cube root."`
+- **Layer 2b** (π₁ only, unit ratio detectable): unit/ratio error hint
+- **Layer 2c** (π₁ only, arithmetic inconsistency): computation check hint
+- **Layer 2d** (π₁ only, wrong quantity): quantity context hint
+- Correct → `""` (empty; teacher forward skipped for this sample)
 
-**Why condition A (scalar-only) is the primary experiment**:
-SDPO paper Section 3 explicitly covers the "learning without rich feedback" regime for
-math/scalar-reward tasks. In this regime, successful sibling rollouts from the same
-rollout group (8 rollouts per prompt) serve as the only implicit feedback f_i. No
-environment text is needed. The teacher re-evaluates the ORIGINAL failed response
-conditioned on [question + sibling solution], assigning per-token credit without any
-text hint about what went wrong. This is what we're reproducing.
+**Two training scripts — two ablation conditions:**
 
-Rich environment feedback (Figure 4 coding setting) and the localized verifier (our
-Layer 2) are secondary ablations (conditions B–D in the slurm script).
+| Script | Condition | `include_env_feedback` | Teacher context |
+|---|---|---|---|
+| `train_oneshot_sdpo.slurm` | **D (current)** | `true` | question + sibling solution + verifier text + original failed response |
+| `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response |
 
-Grading: extract `\boxed{}` → `grade_answer_mathd` OR `grade_answer_sympy`.
-Both taken verbatim from One-Shot-RLVR `verl/utils/reward_score/utils/utils.py`.
+**Important — teacher re-evaluates, does not generate**:
+The teacher does NOT sample a new response. It takes the student's original (failed)
+response tokens and recomputes `p_teacher(token_t | augmented_context + tokens_{1..t-1})`
+for every token. This is the credit-assignment step: the same tokens, rescored under a
+context that includes a correct solution, producing different per-token weights.
+(Verified at `ray_trainer.py:762`: `teacher_input_ids = torch.cat([teacher_prompt_ids, responses], dim=1)`)
+
+Grading fallback chain: `grade_answer_mathd` → `grade_answer_sympy` → `grade_answer_grader`.
 
 ---
 
@@ -393,9 +408,11 @@ PY
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `ImportError: undefined symbol: cuptiActivityEnableDriverApi` | `libcupti.so.12` not found; Apptainer `--nv` rewrites `LD_LIBRARY_PATH`, dropping any host-side additions (`APPTAINERENV_LD_LIBRARY_PATH` does NOT survive `--nv` on this HPC) | Wrap the python call in `bash -c 'export LD_LIBRARY_PATH="/cupti/lib:${LD_LIBRARY_PATH}"; exec python "$@"' --` so it is set **inside** the container after `--nv` injects its paths |
-| `TypeError: Object of type bool_ is not JSON serializable` | SDPO aggregates `reward_extra_infos` into numpy arrays; Python `bool` becomes `numpy.bool_` | Remove `is_correct` from `compute_score` return dict; use `score=1.0/0.0` instead |
+| `ImportError: undefined symbol: cuptiActivityEnableDriverApi` | `libcupti.so.12` not found; Apptainer `--nv` rewrites `LD_LIBRARY_PATH` | `APPTAINERENV_LD_PRELOAD` with container libcupti path (already in slurm) |
+| `TypeError: Object of type bool_ is not JSON serializable` | SDPO aggregates `reward_extra_infos` into numpy arrays; Python `bool` → `numpy.bool_` | Remove `is_correct` from `compute_score` return dict; use `score=1.0/0.0` instead |
 | `fatal: not a git repository` on login node | `/home/woody` is a separate filesystem mount | `GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull ...` or add to `~/.bashrc` |
+| Training stops at ~30 steps despite `total_training_steps=1200` | `ppo_trainer.yaml` default `total_epochs=30`; with 1-batch dataset the epoch loop exhausts after 30 steps, `total_training_steps` never reached | `trainer.total_epochs=9999` — makes epoch loop infinite; `total_training_steps` controls via `is_last_step` |
+| Crash when reprompt > `max_reprompt_len` | `reprompt_truncation` defaults to `"error"` in `ray_trainer.py:333`; tokenizer raises on truncation | `self_distillation.reprompt_truncation=left` — silently truncates from left |
 
 ---
 
@@ -403,22 +420,28 @@ PY
 
 ```
 oneshotrlvrSDPO/
-├── CLAUDE.md                         ← this file
+├── CLAUDE.md                              ← this file
+├── CHANGES.md                             ← session log
 ├── README.md
 ├── requirements.txt
 ├── data/
-│   ├── pi1_r128.parquet              ← 128 copies of π₁ (One-Shot-RLVR training set)
-│   ├── math500.parquet               ← MATH-500 (validation)
-│   └── pi1_example.json              ← π₁ raw problem for reference
+│   ├── pi1_r128.parquet                   ← 128 copies of π₁ (One-Shot-RLVR training set)
+│   ├── math500.parquet                    ← MATH-500 (validation)
+│   └── pi1_example.json                   ← π₁ raw problem for reference
 ├── reward/
-│   └── math_reward.py                ← compute_score() for NaiveRewardManager
+│   ├── math_reward.py                     ← compute_score() for NaiveRewardManager
+│   └── grader.py                          ← math_equal() — third grading fallback
+│                                             requires latex2sympy2 + regex (in pkgs/)
+├── pkgs/                                  ← packages not in container (pip --target)
+│   └── (latex2sympy2, regex, ...)         ← install: pip install --target=pkgs latex2sympy2 regex
 ├── eval/
-│   ├── eval_math500.py               ← standalone MATH-500 eval
+│   ├── eval_math500.py                    ← standalone MATH-500 eval
 │   └── eval_math500.slurm
 └── scripts/
-    ├── train_oneshot_sdpo.slurm      ← MAIN training job (4× A100)
-    ├── run_local_test.sh             ← smoke test (Steps 1-4)
-    └── setup_hpc.sh                  ← one-time HPC env setup
+    ├── train_oneshot_sdpo.slurm           ← condition D: rich feedback (2× A100, 90 steps)
+    ├── train_oneshot_sdpo_nofeedback.slurm← condition A: scalar-only  (2× A100, 90 steps)
+    ├── run_local_test.sh                  ← smoke test (Steps 1-4)
+    └── setup_hpc.sh                       ← one-time HPC env setup
 ```
 
 HPC layout:
@@ -466,30 +489,28 @@ GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull origin claude/integrate-rlvr-sdpo-dlM
 # Add permanently to avoid typing it every time:
 echo 'export GIT_DISCOVERY_ACROSS_FILESYSTEM=1' >> ~/.bashrc
 
-# Smoke test via Apptainer (1× A100, 1 step, production-identical parameters)
-salloc --partition=a100 --gres=gpu:a100:1 --ntasks=1 --cpus-per-task=8 --mem=80GB --time=00:30:00
+# One-time: install packages not in container
+pip install --target=${PROJECT_ROOT}/pkgs latex2sympy2 regex
 
-apptainer exec --nv \
-  --bind /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO \
-  /home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif \
-  bash /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/scripts/run_local_test.sh
-
-# After smoke test: inspect rollout JSONLs to verify feedback field
-# (SMOKE_OUT path is printed at end of script)
-python3 - <<'PY'
-import json
-path = "/tmp/tmp.XXXXX/train_rollouts/step_1.jsonl"  # use printed path
-with open(path) as f:
-    for line in f:
-        d = json.loads(line)
-        if d.get("score", 1) == 0.0:
-            print("feedback:", d.get("feedback", "MISSING")[:100])
-            break
-PY
-
-# Production training (4× A100, 500 steps)
+# Production training — condition D (rich feedback), resumes from global_step_20
 sbatch scripts/train_oneshot_sdpo.slurm
+
+# Production training — condition A (no feedback), fresh run
+sbatch scripts/train_oneshot_sdpo_nofeedback.slurm
 ```
+
+**Per-step timing (measured on 2× A100, job from 2026-04-10):**
+- `timing_s/gen`: ~420s (vLLM rollout — 72% of step time)
+- `timing_s/update_actor`: ~139s
+- `perf/time_per_step`: ~579s (~9.7 min/step)
+- At 90 steps: ~14.6h — fits within 16h SLURM allocation
+
+**First run observations (steps 1–30, 2026-04-10):**
+- `critic/score/mean` at step 30: **0.68** (68% rollouts correct)
+- `self_distillation/success_group_fraction`: 1.0 (every group has ≥1 success)
+- `num_turns/mean`: 2.0 (reprompting active for all sequences)
+- `response_length/clip_ratio`: 0.18 (18% of responses hit 3072-token max)
+- `perf/max_memory_allocated_gb`: 46.6GB total across 2 GPUs (~23.3GB/GPU)
 
 ---
 
@@ -514,6 +535,49 @@ val_kwargs.n=4                                                 # they use 4; we 
 Note: their script targets CSCS cluster (different env/slurm syntax) and uses
 `lcb_v6` coding data on Qwen3-8B. Our task is math (π₁, Qwen2.5-Math-1.5B) but
 the SDPO hyperparameters transfer directly.
+
+---
+
+## Weight and Memory Layout (2× A100-40GB)
+
+Three model slots — not four. The EMA teacher is NOT a separate copy:
+
+```python
+# fsdp_workers.py:905
+self.actor.teacher_module = self.ref_module_fsdp   # teacher IS the ref model
+```
+
+| Slot | Config | Lives on | Notes |
+|---|---|---|---|
+| **Actor** (FSDP sharded ×2) | `param_offload=False`, `optimizer_offload=False` | GPU | Params + Adam states on GPU at all times |
+| **Ref = EMA Teacher** (FSDP) | `ref.param_offload=True` | **CPU** | Loaded to GPU shard-by-shard during teacher forward only, then offloaded back |
+| **vLLM rollout engine** | `gpu_memory_utilization=0.4` | GPU (1 GPU, TP=1) | Reserves ~16GB permanently; KV cache stays allocated |
+
+**Rollout flow** (`async_rollout_mode=True` hardcoded; uses `AgentLoopManager`):
+```
+generate_sequences()
+  wake_up()  → rollout_mode():
+                 FSDP.state_dict()            # all-gather shards across 2 GPUs
+                 rollout.update_weights()     # overwrite vLLM weights in-place
+  AgentLoopWorkers run (one per GPU, async multi-turn)
+  sleep()    → trainer_mode()
+               # KV cache stays allocated (free_cache_engine not set)
+```
+
+**Update flow:**
+```
+ulysses_sharding_manager.__enter__()    # sequence parallel context (no-op, no Ulysses SP)
+  actor FSDP forward → student log probs
+  teacher forward (no_grad):
+    FSDP loads ref shard to GPU → forward → offload back to CPU  (×28 layers)
+  actor backward → grad → optimizer step
+  EMA update:  teacher_param.data = 0.99×teacher + 0.01×student_data.to(CPU)
+ulysses_sharding_manager.__exit__()
+```
+
+**"Async" clarification**: `async_rollout_mode=True` means agent loop workers handle
+prompts concurrently. It does NOT overlap rollout N+1 with training step N — the
+training loop still waits for `generate_sequences()` to finish before updating.
 
 ---
 
