@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=oneshot_sdpo
 #SBATCH --partition=a100
-#SBATCH --gres=gpu:a100:4
+#SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
@@ -202,7 +202,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=16 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
@@ -245,10 +245,10 @@ apptainer exec --nv \
     custom_reward_function.name=compute_score \
     \
     'trainer.logger=["console","tensorboard"]' \
-    trainer.n_gpus_per_node=4 \
+    trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=190 \
+    trainer.total_training_steps=90 \
     trainer.save_freq=20 \
     trainer.test_freq=25 \
     trainer.val_before_train=True \
