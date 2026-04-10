@@ -256,7 +256,7 @@ apptainer exec --nv \
     trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1 \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
-    trainer.resume_mode=disable \
+    trainer.resume_mode=auto \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.default_hdfs_dir=null \
