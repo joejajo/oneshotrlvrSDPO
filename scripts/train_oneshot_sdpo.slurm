@@ -3,7 +3,7 @@
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:4
 #SBATCH --ntasks=1
-#SBATCH --time=48:00:00
+#SBATCH --time=16:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
 
@@ -248,7 +248,7 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=500 \
+    trainer.total_training_steps=190 \
     trainer.save_freq=20 \
     trainer.test_freq=25 \
     trainer.val_before_train=True \
