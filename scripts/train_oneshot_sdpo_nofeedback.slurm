@@ -24,7 +24,7 @@ TRAIN_PARQUET=${ONESHOT_DIR}/data/pi1_r128.parquet
 EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
 
 REWARD_PATH=${ONESHOT_DIR}/reward/math_reward.py
-CKPT_DIR=${OUTPUT_ROOT}/checkpoints
+CKPT_DIR=${OUTPUT_ROOT}/checkpoints_nofb
 ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts_nofb
 TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts_nofb
 
