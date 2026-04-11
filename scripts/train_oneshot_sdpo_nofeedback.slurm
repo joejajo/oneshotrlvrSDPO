@@ -181,6 +181,8 @@ apptainer exec --nv \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.entropy_coeff=0.001 \
+    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.kl_loss_coef=0.001 \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
     actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
