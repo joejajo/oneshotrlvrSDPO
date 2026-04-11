@@ -141,6 +141,7 @@ def main():
     from vllm import LLM, SamplingParams  # noqa: PLC0415  (late import — vLLM may not be available at import time)
     llm = LLM(
         model=actor_path,
+        dtype="bfloat16",
         gpu_memory_utilization=args.gpu_memory_utilization,
         trust_remote_code=True,
     )
