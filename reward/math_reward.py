@@ -770,12 +770,18 @@ def compute_score(
     """
     # use_think=False: extract from the full response string.
     # Qwen2.5-Math-1.5B is not a thinking model — no <think>...</think> blocks.
+    # Only generate feedback for training data (deepscaler / π₁).
+    # MATH-500 and all other eval data sources get feedback="" always:
+    # they are validation-only (single-turn, no reprompting) so the
+    # feedback field would never be consumed by the trainer.
+    is_training_source = (data_source == "deepscaler")
+
     model_answer = extract_answer(solution_str)
     if model_answer is None:
         return {
             "score": 0.0,
             "extracted_answer": "",
-            "feedback": _make_feedback(no_boxed=True),
+            "feedback": _make_feedback(no_boxed=True) if is_training_source else "",
         }
 
     # Normalise ground_truth: may be str, float, int, or list
@@ -799,7 +805,7 @@ def compute_score(
             "extracted_answer": model_answer,
             "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
                                        data_source=data_source, solution_str=solution_str,
-                                       ground_truth=""),
+                                       ground_truth="") if is_training_source else "",
         }
 
     # Use first processed ground truth for feedback diagnostics (ratio, unit checks).
@@ -817,7 +823,7 @@ def compute_score(
         "extracted_answer": model_answer,
         "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
                                    data_source=data_source, solution_str=solution_str,
-                                   ground_truth=primary_gt),
+                                   ground_truth=primary_gt) if is_training_source else "",
     }
 
 
@@ -832,10 +838,10 @@ if __name__ == "__main__":
     assert r["feedback"] == "", f"Expected empty feedback on correct, got {r['feedback']}"
     assert "is_correct" not in r, "is_correct must not appear (causes numpy.bool_ serialization error)"
 
-    # Wrong answer — non-pi1 (MATH-500): generic fallback feedback
+    # Wrong answer — non-pi1 (MATH-500): feedback must be empty (val-only, never consumed)
     r = compute_score("lighteval/MATH", "\\boxed{15}", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert r["feedback"] == "Your answer 15 is incorrect.", f"Unexpected feedback: {r['feedback']}"
+    assert r["feedback"] == "", f"Expected empty feedback for MATH-500, got: {r['feedback']}"
 
     # π₁ Layer 2: model wrote V³=2048 (correct intermediate) but wrong cube root
     # → localized diagnostic, no correct answer revealed
