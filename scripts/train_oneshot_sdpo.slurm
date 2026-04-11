@@ -217,7 +217,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
     actor_rollout_ref.actor.self_distillation.alpha=1.0 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.001 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
