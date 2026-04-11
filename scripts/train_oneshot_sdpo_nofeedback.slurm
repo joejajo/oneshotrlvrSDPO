@@ -4,15 +4,15 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_nofb/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_nofb/logs/train_%j.err
 
 set -euo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output
+OUTPUT_ROOT=${PROJECT_ROOT}/output_nofb
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -24,9 +24,9 @@ TRAIN_PARQUET=${ONESHOT_DIR}/data/pi1_r128.parquet
 EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
 
 REWARD_PATH=${ONESHOT_DIR}/reward/math_reward.py
-CKPT_DIR=${OUTPUT_ROOT}/checkpoints_nofb
-ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts_nofb
-TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts_nofb
+CKPT_DIR=${OUTPUT_ROOT}/checkpoints
+ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts
+TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts
 
 # ── Environment ───────────────────────────────────────────────────────────────
 # No conda or module load needed — runtime is supplied by the Apptainer container.
