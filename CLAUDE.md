@@ -193,7 +193,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `ppo_mini_batch_size` | `256` | `16` | 2 GPUs; keeps peak logit memory safe |
 | `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences up to 5120 tokens; 4096 bin ceiling prevents silent OOM |
 | `optim.lr` | `1e-6` | `1e-6` | Same as default |
-| `optim.lr_warmup_steps` | `-1` | `10` | Brief warmup for one-shot |
+| `optim.lr_warmup_steps` | `-1` | `0` | Matches SDPO rich_feedback experiment; no warmup |
 
 ### rollout/rollout.yaml defaults → our overrides
 
