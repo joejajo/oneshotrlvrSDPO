@@ -170,6 +170,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
     actor_rollout_ref.rollout.enforce_eager=True \
     actor_rollout_ref.rollout.agent.num_workers=1 \
     \
