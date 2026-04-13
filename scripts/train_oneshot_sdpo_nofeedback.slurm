@@ -229,7 +229,7 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=75 \
+    trainer.total_training_steps=120 \
     trainer.save_freq=1 \
     trainer.test_freq=2 \
     trainer.val_before_train=True \
