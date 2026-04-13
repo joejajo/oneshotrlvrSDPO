@@ -42,8 +42,10 @@ export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 
 # Make reward module and verl importable inside the container.
 SDPO_DIR=${PROJECT_ROOT}/SDPO
-# pkgs/ holds packages not in the container (latex2sympy2, regex).
-# Install once with: pip install --target=${PROJECT_ROOT}/pkgs latex2sympy2 regex
+# pkgs/ holds packages not in the container (latex2sympy2, regex, antlr4).
+# Install once with:
+#   pip install --target=${PROJECT_ROOT}/pkgs latex2sympy2 regex antlr4-python3-runtime==4.9.3
+# antlr4-python3-runtime==4.9.3 must match latex2sympy2's generated code version.
 PKGS_DIR=${PROJECT_ROOT}/pkgs
 export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PKGS_DIR}:${PYTHONPATH:-}"
 
