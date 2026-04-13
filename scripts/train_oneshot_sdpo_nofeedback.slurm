@@ -12,7 +12,7 @@ set -euo pipefail
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_nofb
+OUTPUT_ROOT=${PROJECT_ROOT}/output_nofb_kl
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -190,6 +190,8 @@ apptainer exec --nv \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.entropy_coeff=0.001 \
+    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.kl_loss_coef=0.001 \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
     actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
@@ -198,7 +200,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
     actor_rollout_ref.actor.self_distillation.alpha=0.5 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
@@ -234,7 +236,7 @@ apptainer exec --nv \
     trainer.test_freq=2 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_nofb \
+    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_nofb_kl \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.resume_mode=disable \
