@@ -182,10 +182,10 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.max_reprompt_len` | `10240` | `2048` | Caps reprompt length; truncation_side=left prevents crash |
 | `self_distillation.reprompt_truncation` | `"error"` | `left` | **Critical**: default "error" crashes when reprompt > max_reprompt_len; "left" truncates silently |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
-| `self_distillation.distillation_topk` | `100` | `20` | Matches SDPO rich_feedback experiments; less compute |
-| `self_distillation.alpha` | `0.5` | `1.0` (condition D, rich feedback) / `0.5` (condition A, no feedback) | Paper Table 12: Section 3 (scalar reward) uses JSD (α=0.5); Section 4 (rich feedback) uses reverse KL (α=1.0) |
+| `self_distillation.distillation_topk` | `100` | `100` (condition A) / `20` (condition D) | Condition A = Section 3 default; condition D = rich_feedback experiment setting |
+| `self_distillation.alpha` | `0.5` | `0.5` (condition A) / `1.0` (condition D) | Paper Table 12: Section 3 (scalar reward) uses JSD (α=0.5); Section 4 (rich feedback) uses reverse KL (α=1.0) |
 | `self_distillation.teacher_regularization` | `ema` | `ema` | Standard SDPO |
-| `self_distillation.teacher_update_rate` | `0.05` | `0.01` | Slower EMA = more stable teacher; matches SDPO rich_feedback experiments |
+| `self_distillation.teacher_update_rate` | `0.05` | `0.05` (condition A) / `0.01` (condition D) | Condition A = Section 3 default; condition D = rich_feedback experiment setting (slower EMA) |
 | `self_distillation.is_clip` | `2` | `2.0` | Same as default |
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |

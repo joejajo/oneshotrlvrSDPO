@@ -142,6 +142,9 @@ echo "================================================================"
 # distillation loss provides token-level supervision on HOW the correct answer
 # was reached — all without any text hint about what went wrong.
 #
+# Hyperparameters match SDPO paper Section 3 (scalar reward, Table 4 defaults):
+#   alpha=0.5 (JSD), teacher_update_rate=0.05, distillation_topk=100
+#
 # This is condition A in our ablation (see train_oneshot_sdpo.slurm for B/C/D).
 # It matches the SDPO paper Section 3 math/scalar-reward regime exactly.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -191,11 +194,11 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
     actor_rollout_ref.actor.self_distillation.alpha=0.5 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
-    actor_rollout_ref.actor.self_distillation.distillation_topk=20 \
+    actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
     \
