@@ -16,7 +16,11 @@ from collections import defaultdict
 from sympy import simplify, N
 from sympy.parsing.sympy_parser import parse_expr
 from sympy.parsing.latex import parse_latex
+import sys as _sys, io as _io
+_stderr, _sys.stderr = _sys.stderr, _io.StringIO()
 from latex2sympy2 import latex2sympy
+_sys.stderr = _stderr
+del _stderr, _sys, _io
 
 # from .parser import choice_answer_clean, strip_string
 # from parser import choice_answer_clean
