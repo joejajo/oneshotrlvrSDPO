@@ -192,8 +192,8 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `entropy_coeff` | `0` | `0.001` | Entropy bonus matching One-Shot-RLVR's KL coeff; prevents collapse |
 | `ppo_mini_batch_size` | `256` | `16` | 2 GPUs; keeps peak logit memory safe |
 | `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences up to 5120 tokens; 4096 bin ceiling prevents silent OOM |
-| `optim.lr` | `1e-6` | `1e-5` (condition A) / `1e-6` (condition D) | Condition A matches SDPO generalization experiment (run_sdpo_all.sh); condition D matches rich_feedback experiment |
-| `optim.lr_warmup_steps` | `-1` | `10` (condition A) / `0` (condition D) | Condition A matches SDPO generalization experiment; condition D matches rich_feedback experiment |
+| `optim.lr` | `1e-6` | `1e-6` (both conditions) | SDPO generalization uses 1e-5 at batch=32. We use batch=128 (4× larger) so LR scaled down to 1e-6 to keep effective update size equivalent. lr=1e-5 caused catastrophic val drop (30.6%→16%) at step 12. |
+| `optim.lr_warmup_steps` | `-1` | `0` (both conditions) | No warmup; LR is already conservative |
 
 ### rollout/rollout.yaml defaults → our overrides
 
