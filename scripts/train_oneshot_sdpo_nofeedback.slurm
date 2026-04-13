@@ -137,7 +137,8 @@ echo "================================================================"
 # *successful sibling rollout* from the same group of 8 as the implicit
 # demonstration.  The teacher re-processes [question + sibling solution] and
 # assigns per-token credit to that sequence, which the student distils via
-# reverse KL (alpha=1.0).  The scalar reward drives the GRPO advantage; the
+# Jensen-Shannon divergence (alpha=0.5, per paper Table 12 Section 3).
+# The scalar reward drives the GRPO advantage; the
 # distillation loss provides token-level supervision on HOW the correct answer
 # was reached — all without any text hint about what went wrong.
 #
