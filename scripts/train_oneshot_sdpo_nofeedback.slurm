@@ -226,8 +226,8 @@ apptainer exec --nv \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
     trainer.total_training_steps=75 \
-    trainer.save_freq=20 \
-    trainer.test_freq=20 \
+    trainer.save_freq=1 \
+    trainer.test_freq=2 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
     trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_nofb \
@@ -236,7 +236,7 @@ apptainer exec --nv \
     trainer.resume_mode=disable \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
-    trainer.max_actor_ckpt_to_keep=2 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=2147483648 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
