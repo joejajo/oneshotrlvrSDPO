@@ -188,7 +188,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
-    actor_rollout_ref.actor.self_distillation.alpha=1.0 \
+    actor_rollout_ref.actor.self_distillation.alpha=0.5 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
