@@ -194,7 +194,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.adv_estimator=grpo \
-    algorithm.norm_adv_by_std_in_grpo=False \
+    algorithm.norm_adv_by_std_in_grpo=True \
     algorithm.rollout_correction.rollout_is=token \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
     data.train_files="[${ONESHOT_DIR}/data/pi1_r128.parquet]" \

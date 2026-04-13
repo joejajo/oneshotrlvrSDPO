@@ -162,7 +162,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | Key | SDPO default | Our override | Reason |
 |---|---|---|---|
 | `algorithm.adv_estimator` | `gae` | `grpo` | SDPO requires grpo (no critic) |
-| `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` | SDPO paper; JSD dominates gradient |
+| `algorithm.norm_adv_by_std_in_grpo` | `True` | `True` | Keep YAML default (std normalization active) |
 | `trainer.logger` | `["console","wandb"]` | `["console","tensorboard"]` | No W&B on HPC |
 | `trainer.n_gpus_per_node` | `8` | `2` | Our A100 allocation |
 | `trainer.total_epochs` | `30` | `9999` | **Critical**: with 128-row dataset and batch_size=128, len(dataloader)=1 → epoch loop exits after 30 steps, ignoring total_training_steps. 9999 makes epoch loop infinite so total_training_steps controls termination |

@@ -166,7 +166,7 @@ echo "================================================================"
 # SDPO keys (absent from ppo_trainer.yaml, must be set explicitly):
 #   actor_rollout_ref.actor.policy_loss.loss_mode=sdpo
 #   algorithm.adv_estimator=grpo
-#   algorithm.norm_adv_by_std_in_grpo=False
+#   algorithm.norm_adv_by_std_in_grpo=True
 #   algorithm.rollout_correction.rollout_is=token
 #   algorithm.rollout_correction.rollout_is_threshold=2.0
 #   actor_rollout_ref.rollout.calculate_log_probs=True
@@ -232,7 +232,7 @@ apptainer exec --nv \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     \
     algorithm.adv_estimator=grpo \
-    algorithm.norm_adv_by_std_in_grpo=False \
+    algorithm.norm_adv_by_std_in_grpo=True \
     algorithm.rollout_correction.rollout_is=token \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
     \
