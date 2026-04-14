@@ -315,12 +315,13 @@ Four-layer verifier in `_make_feedback()`:
 - **Layer 2d** (π₁ only, wrong quantity): quantity context hint
 - Correct → `""` (empty; teacher forward skipped for this sample)
 
-**Two training scripts — two ablation conditions:**
+**Three training scripts — ablation conditions:**
 
-| Script | Condition | `include_env_feedback` | Teacher context |
-|---|---|---|---|
-| `train_oneshot_sdpo.slurm` | **D (current)** | `true` | question + sibling solution + verifier text + original failed response |
-| `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response |
+| Script | Condition | `include_env_feedback` | Teacher context | Notes |
+|---|---|---|---|---|
+| `train_oneshot_sdpo.slurm` | **D** | `true` | question + sibling solution + verifier text + original failed response | alpha=1.0, topk=20, batch=128, temp=0.6 |
+| `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=128, temp=0.6, entropy=0.001 |
+| `train_oneshot_sdpo_paper_sec3.slurm` | **Paper §3** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=32, temp=1.0, **no entropy**, lr=1e-5, norm_adv=True |
 
 **Important — teacher re-evaluates, does not generate**:
 The teacher does NOT sample a new response. It takes the student's original (failed)
@@ -449,7 +450,8 @@ oneshotrlvrSDPO/
 │   └── eval_math500.slurm
 └── scripts/
     ├── train_oneshot_sdpo.slurm           ← condition D: rich feedback (2× A100, 90 steps)
-    ├── train_oneshot_sdpo_nofeedback.slurm← condition A: scalar-only  (2× A100, 90 steps)
+    ├── train_oneshot_sdpo_nofeedback.slurm← condition A: scalar-only  (2× A100, 120 steps)
+    ├── train_oneshot_sdpo_paper_sec3.slurm← paper §3: exact settings  (2× A100, 200 steps)
     ├── run_local_test.sh                  ← smoke test (Steps 1-4)
     └── setup_hpc.sh                       ← one-time HPC env setup
 ```
@@ -507,6 +509,9 @@ sbatch scripts/train_oneshot_sdpo.slurm
 
 # Production training — condition A (no feedback), fresh run
 sbatch scripts/train_oneshot_sdpo_nofeedback.slurm
+
+# Paper Section 3 exact settings (batch=32, temp=1.0, no entropy, lr=1e-5)
+sbatch scripts/train_oneshot_sdpo_paper_sec3.slurm
 ```
 
 **Per-step timing (measured on 2× A100, job from 2026-04-10):**

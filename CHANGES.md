@@ -343,14 +343,48 @@ answers now return `{"score": ..., "extracted_answer": ...}` only.
 
 ---
 
+---
+
+### 2026-04-14 — New slurm: Paper Section 3 exact settings
+
+**Files**: `scripts/train_oneshot_sdpo_paper_sec3.slurm` (new)
+
+Added a third training configuration matching SDPO paper Section 3 (Table 4) scalar-reward
+setting as precisely as possible on the π₁ task.
+
+**Key differences from condition A (`train_oneshot_sdpo_nofeedback.slurm`)**:
+
+| Parameter | Condition A | Paper Section 3 | Reason |
+|---|---|---|---|
+| `rollout.temperature` | 0.6 | **1.0** | Paper uses temp=1.0 for scalar reward regime |
+| `data.train_batch_size` | 128 | **32** | Paper batch size for Section 3 experiments |
+| `optim.lr` | 1e-6 | **1e-5** | Paper lr for batch=32; our 1e-6 was scaled for batch=128 |
+| `entropy_coeff` | 0.001 | **0** | Paper has no entropy term ("avoiding entropy") |
+| `norm_adv_by_std_in_grpo` | False | **True** | Paper/YAML default |
+| `total_training_steps` | 120 | **200** | batch=32 → ~4 steps/epoch → ~140s/step; 200×140s≈7.8h |
+| `test_freq` | 2 | **5** | Fewer val runs to save wall time at batch=32 |
+
+**Shared with condition A** (all SDPO-specific defaults):
+- `alpha=0.5` (JSD), `teacher_update_rate=0.05`, `distillation_topk=100`
+- `include_environment_feedback=false`, `is_clip=2.0`, `rollout.n=8`
+- Reprompt template and solution template (explicit overrides)
+- `val_kwargs.n=4, temperature=0.6` (stochastic validation)
+
+Output dir: `output_sec3/`. Fresh run, `resume_mode=disable`.
+
+---
+
 ## Current State
 
 - **Branch**: `claude/integrate-rlvr-sdpo-dlMU5`
-- **Status**: Ready to submit (condition A fresh run)
+- **Status**: Three scripts ready to submit
 - **Commands**:
   - `sbatch scripts/train_oneshot_sdpo_nofeedback.slurm` — condition A, fresh run, 120 steps
   - `sbatch scripts/train_oneshot_sdpo.slurm` — condition D, resumes from global_step_20, 90 steps
+  - `sbatch scripts/train_oneshot_sdpo_paper_sec3.slurm` — paper Section 3 exact, fresh run, 200 steps
 - **Config (condition A)**: 2× A100-40GB, 120 steps, train_batch=128, rollout.n=8, 16h wall time
-- **Measured timing**: ~579s/step (~9.7 min); 120 steps ≈ 19.4h → may need to interrupt; watch step ~100
+- **Config (paper sec3)**: 2× A100-40GB, 200 steps, train_batch=32, rollout.n=8, temp=1.0, no entropy; ~7.8h
+- **Measured timing (condition A)**: ~579s/step (~9.7 min); 120 steps ≈ 19.4h → may need to interrupt
+- **Estimated timing (paper sec3)**: ~140s/step; 200 steps ≈ 7.8h — fits well within 16h
 - **Key metrics to watch**: `clip_ratio` (must drop <10% for train to stabilise), `success_group_fraction`
 - **Checkpoint available**: `output/checkpoints/global_step_20` (condition D, from prior run)
