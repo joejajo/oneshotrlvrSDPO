@@ -517,6 +517,16 @@ def extract_answer(passage: str) -> str:
 #   - matrix equality, equation forms, latex2sympy parsing
 # Gracefully disabled if latex2sympy2 or regex are not installed.
 # ---------------------------------------------------------------------------
+
+# latex2sympy2 generated parser targets ANTLR 4.7.2 but we install 4.9.3.
+# antlr4.Runtime.checkVersion() prints directly to stderr — PYTHONWARNINGS can't
+# suppress it. Monkey-patch before the import so the check is a no-op.
+try:
+    import antlr4.Runtime
+    antlr4.Runtime.checkVersion = lambda toolVersion: None
+except Exception:
+    pass
+
 try:
     from reward.grader import math_equal as _math_equal
     _GRADER_AVAILABLE = True
