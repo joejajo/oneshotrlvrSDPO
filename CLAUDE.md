@@ -96,7 +96,7 @@ Key differences vs our SDPO implementation:
 |---|---|---|
 | Algorithm | GRPO (`adv_estimator=grpo`) | SDPO (`loss_mode=sdpo` + JSD) |
 | KL loss | `use_kl_loss=True`, coef=0.001 | `use_kl_loss=False` (SDPO uses JSD) |
-| Entropy | not set | `entropy_coeff=0.001` |
+| Entropy | not set | `entropy_coeff=0` (not set; original SDPO loss) |
 | Response length | 3072 | 3072 |
 | GPUs | 8 | 2 |
 | max_model_len | not set (old verl) | 8192 |
@@ -190,7 +190,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.is_clip` | `2` | `2.0` | Same as default |
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
-| `entropy_coeff` | `0` | `0.001` | Entropy bonus matching One-Shot-RLVR's KL coeff; prevents collapse |
+| `entropy_coeff` | `0` | not overridden | Restored to SDPO default (0); original SDPO loss has no entropy term |
 | `ppo_mini_batch_size` | `256` | `16` | 2 GPUs; keeps peak logit memory safe |
 | `ppo_max_token_len_per_gpu` | — | `8000` | Raised from 4096: response lengths hit 1300+ tokens during training; 8000 matches working 4-GPU reference value; peak logit memory ~4.9 GB/GPU |
 | `optim.lr` | `1e-6` | `1e-6` (both conditions) | SDPO generalization uses 1e-5 at batch=32. We use batch=128 (4× larger) so LR scaled down to 1e-6 to keep effective update size equivalent. lr=1e-5 caused catastrophic val drop (30.6%→16%) at step 12. |
@@ -320,7 +320,7 @@ Four-layer verifier in `_make_feedback()`:
 | Script | Condition | `include_env_feedback` | Teacher context | Notes |
 |---|---|---|---|---|
 | `train_oneshot_sdpo.slurm` | **D** | `true` | question + sibling solution + verifier text + original failed response | alpha=1.0, topk=20, batch=128, temp=0.6 |
-| `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=128, temp=0.6, entropy=0.001 |
+| `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=128, temp=0.6, no entropy |
 | `train_oneshot_sdpo_paper_sec3.slurm` | **Paper §3** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=32, temp=1.0, **no entropy**, lr=1e-5, norm_adv=True |
 
 **Important — teacher re-evaluates, does not generate**:

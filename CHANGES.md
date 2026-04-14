@@ -374,6 +374,30 @@ Output dir: `output_sec3/`. Fresh run, `resume_mode=disable`.
 
 ---
 
+---
+
+### 2026-04-14 — Remove entropy from all scripts; restore original SDPO loss
+
+**Files**: `scripts/train_oneshot_sdpo.slurm`, `scripts/train_oneshot_sdpo_nofeedback.slurm`, `CLAUDE.md`
+
+Removed `entropy_coeff=0.001` from condition A and condition D scripts.
+
+The original SDPO loss is:
+
+```
+L_SDPO = α·KL(m ‖ π_teacher) + (1−α)·KL(m ‖ π_student)
+```
+
+where `m = α·π_teacher + (1−α)·π_student` is the mixture distribution.
+There is no entropy term in the paper's loss. The entropy bonus was added previously
+to match One-Shot-RLVR's `kl_loss_coef=0.001` but that was a GRPO-specific setting
+(KL to reference model). In SDPO the teacher IS the reference model; the distillation
+loss already prevents collapse. Reverting to `entropy_coeff=0` (SDPO default).
+
+`train_oneshot_sdpo_paper_sec3.slurm` already had `entropy_coeff=0` — no change needed.
+
+---
+
 ## Current State
 
 - **Branch**: `claude/integrate-rlvr-sdpo-dlMU5`
@@ -382,7 +406,7 @@ Output dir: `output_sec3/`. Fresh run, `resume_mode=disable`.
   - `sbatch scripts/train_oneshot_sdpo_nofeedback.slurm` — condition A, fresh run, 120 steps
   - `sbatch scripts/train_oneshot_sdpo.slurm` — condition D, resumes from global_step_20, 90 steps
   - `sbatch scripts/train_oneshot_sdpo_paper_sec3.slurm` — paper Section 3 exact, fresh run, 200 steps
-- **Config (condition A)**: 2× A100-40GB, 120 steps, train_batch=128, rollout.n=8, 16h wall time
+- **Config (condition A)**: 2× A100-40GB, 120 steps, train_batch=128, rollout.n=8, no entropy
 - **Config (paper sec3)**: 2× A100-40GB, 200 steps, train_batch=32, rollout.n=8, temp=1.0, no entropy; ~7.8h
 - **Measured timing (condition A)**: ~579s/step (~9.7 min); 120 steps ≈ 19.4h → may need to interrupt
 - **Estimated timing (paper sec3)**: ~140s/step; 200 steps ≈ 7.8h — fits well within 16h
