@@ -151,7 +151,7 @@ echo "================================================================"
 #
 # Step budget:
 #   batch=32, ~4 prompts/step (128 prompts / 32 batch), ~140s/step → 200 steps ≈ 7.8h
-#   16h wall time gives headroom for val (test_freq=5) and startup.
+#   16h wall time gives headroom for startup. Validation is in-memory (Hybrid Engine weight sync), essentially free.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -235,8 +235,8 @@ apptainer exec --nv \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
     trainer.total_training_steps=200 \
-    trainer.save_freq=1 \
-    trainer.test_freq=5 \
+    trainer.save_freq=10 \
+    trainer.test_freq=1 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
     trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_sec3 \
