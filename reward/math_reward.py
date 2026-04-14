@@ -778,11 +778,10 @@ def compute_score(
 
     model_answer = extract_answer(solution_str)
     if model_answer is None:
-        return {
-            "score": 0.0,
-            "extracted_answer": "",
-            "feedback": _make_feedback(no_boxed=True) if is_training_source else "",
-        }
+        result = {"score": 0.0, "extracted_answer": ""}
+        if is_training_source:
+            result["feedback"] = _make_feedback(no_boxed=True)
+        return result
 
     # Normalise ground_truth: may be str, float, int, or list
     if isinstance(ground_truth, (str, float, int)):
@@ -800,13 +799,12 @@ def compute_score(
             processed_ground_truths.append(gt_str)
 
     if not processed_ground_truths:
-        return {
-            "score": 0.0,
-            "extracted_answer": model_answer,
-            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
-                                       data_source=data_source, solution_str=solution_str,
-                                       ground_truth="") if is_training_source else "",
-        }
+        result = {"score": 0.0, "extracted_answer": model_answer}
+        if is_training_source:
+            result["feedback"] = _make_feedback(no_boxed=False, model_answer=model_answer,
+                                                data_source=data_source, solution_str=solution_str,
+                                                ground_truth="")
+        return result
 
     # Use first processed ground truth for feedback diagnostics (ratio, unit checks).
     primary_gt = processed_ground_truths[0]
@@ -816,15 +814,14 @@ def compute_score(
                       or grade_answer_sympy(model_answer, gt)
                       or grade_answer_grader(model_answer, gt))
         if is_correct:
-            return {"score": 1.0, "extracted_answer": model_answer, "feedback": ""}
+            return {"score": 1.0, "extracted_answer": model_answer}
 
-    return {
-        "score": 0.0,
-        "extracted_answer": model_answer,
-        "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
-                                   data_source=data_source, solution_str=solution_str,
-                                   ground_truth=primary_gt) if is_training_source else "",
-    }
+    result = {"score": 0.0, "extracted_answer": model_answer}
+    if is_training_source:
+        result["feedback"] = _make_feedback(no_boxed=False, model_answer=model_answer,
+                                            data_source=data_source, solution_str=solution_str,
+                                            ground_truth=primary_gt)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -832,16 +829,16 @@ def compute_score(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Correct answer in \boxed{}
+    # Correct answer in \boxed{} — no feedback key (training or val)
     r = compute_score("lighteval/MATH", "\\boxed{12.8}", "12.8")
     assert r["score"] == 1.0, f"Expected 1.0, got {r}"
-    assert r["feedback"] == "", f"Expected empty feedback on correct, got {r['feedback']}"
+    assert "feedback" not in r, f"feedback key must be absent for correct answers, got {r}"
     assert "is_correct" not in r, "is_correct must not appear (causes numpy.bool_ serialization error)"
 
-    # Wrong answer — non-pi1 (MATH-500): feedback must be empty (val-only, never consumed)
+    # Wrong answer — non-pi1 (MATH-500): no feedback key (val-only, never consumed by trainer)
     r = compute_score("lighteval/MATH", "\\boxed{15}", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert r["feedback"] == "", f"Expected empty feedback for MATH-500, got: {r['feedback']}"
+    assert "feedback" not in r, f"feedback key must be absent for MATH-500, got {r}"
 
     # π₁ Layer 2: model wrote V³=2048 (correct intermediate) but wrong cube root
     # → localized diagnostic, no correct answer revealed
