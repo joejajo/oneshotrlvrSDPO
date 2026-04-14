@@ -755,8 +755,10 @@ def compute_score(
     Returns a dict:
         score           : 1.0 if correct, 0.0 otherwise
         extracted_answer: the extracted \\boxed{} content, or None
-        feedback        : deterministic hint string for failed rollouts;
-                          empty string for correct answers.
+        feedback        : deterministic hint string for failed π₁ rollouts;
+                          always present (empty string for correct / val answers).
+                          Must be present in every return dict so agent_loop can
+                          stack reward_extra_infos into uniform numpy arrays.
                           Consumed by SDPO ray_trainer when
                           include_environment_feedback=true.
 
@@ -778,10 +780,11 @@ def compute_score(
 
     model_answer = extract_answer(solution_str)
     if model_answer is None:
-        result = {"score": 0.0, "extracted_answer": ""}
-        if is_training_source:
-            result["feedback"] = _make_feedback(no_boxed=True)
-        return result
+        return {
+            "score": 0.0,
+            "extracted_answer": "",
+            "feedback": _make_feedback(no_boxed=True) if is_training_source else "",
+        }
 
     # Normalise ground_truth: may be str, float, int, or list
     if isinstance(ground_truth, (str, float, int)):
@@ -799,12 +802,13 @@ def compute_score(
             processed_ground_truths.append(gt_str)
 
     if not processed_ground_truths:
-        result = {"score": 0.0, "extracted_answer": model_answer}
-        if is_training_source:
-            result["feedback"] = _make_feedback(no_boxed=False, model_answer=model_answer,
-                                                data_source=data_source, solution_str=solution_str,
-                                                ground_truth="")
-        return result
+        return {
+            "score": 0.0,
+            "extracted_answer": model_answer,
+            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
+                                       data_source=data_source, solution_str=solution_str,
+                                       ground_truth="") if is_training_source else "",
+        }
 
     # Use first processed ground truth for feedback diagnostics (ratio, unit checks).
     primary_gt = processed_ground_truths[0]
@@ -814,14 +818,15 @@ def compute_score(
                       or grade_answer_sympy(model_answer, gt)
                       or grade_answer_grader(model_answer, gt))
         if is_correct:
-            return {"score": 1.0, "extracted_answer": model_answer}
+            return {"score": 1.0, "extracted_answer": model_answer, "feedback": ""}
 
-    result = {"score": 0.0, "extracted_answer": model_answer}
-    if is_training_source:
-        result["feedback"] = _make_feedback(no_boxed=False, model_answer=model_answer,
-                                            data_source=data_source, solution_str=solution_str,
-                                            ground_truth=primary_gt)
-    return result
+    return {
+        "score": 0.0,
+        "extracted_answer": model_answer,
+        "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
+                                   data_source=data_source, solution_str=solution_str,
+                                   ground_truth=primary_gt) if is_training_source else "",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -829,16 +834,16 @@ def compute_score(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Correct answer in \boxed{} — no feedback key (training or val)
+    # Correct answer in \boxed{} — feedback="" (always present so agent_loop keys are uniform)
     r = compute_score("lighteval/MATH", "\\boxed{12.8}", "12.8")
     assert r["score"] == 1.0, f"Expected 1.0, got {r}"
-    assert "feedback" not in r, f"feedback key must be absent for correct answers, got {r}"
+    assert r.get("feedback") == "", f"feedback must be empty string for correct answers, got {r}"
     assert "is_correct" not in r, "is_correct must not appear (causes numpy.bool_ serialization error)"
 
-    # Wrong answer — non-pi1 (MATH-500): no feedback key (val-only, never consumed by trainer)
+    # Wrong answer — non-pi1 (MATH-500): feedback="" (present but empty; val never uses it)
     r = compute_score("lighteval/MATH", "\\boxed{15}", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert "feedback" not in r, f"feedback key must be absent for MATH-500, got {r}"
+    assert r.get("feedback") == "", f"feedback must be empty string for MATH-500, got {r}"
 
     # π₁ Layer 2: model wrote V³=2048 (correct intermediate) but wrong cube root
     # → localized diagnostic, no correct answer revealed
