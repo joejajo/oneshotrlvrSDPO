@@ -303,13 +303,54 @@ At step 30: `critic/score/mean=0.68`, all groups have successful sibling,
 
 ---
 
+---
+
+### 2026-04-14 — Condition A tuning: token budget, advantage normalisation, EMA rate; feedback cleanup
+
+**Files**: `scripts/train_oneshot_sdpo_nofeedback.slurm`, `reward/math_reward.py`, `CLAUDE.md`
+
+#### Observations from first condition A run (steps 1–21)
+
+- Step 0 baseline val: **30.4%** — matches prior baseline
+- Val collapses to **11.8%** by step 6: 128× identical gradient signal overfit π₁
+- Train reward oscillates: 0.736 (step 4) → 0.422 (step 6) → partial recovery
+- **Root cause**: `clip_ratio` jumped to **29.1%** at step 6 — response length 634→1331 tokens; model writes correct but too-long reasoning, truncated before `\boxed{}` → reward=0
+- `rollout_is_max` spiked to 13.69 at step 14 — severe IS drift confirming policy mismatch
+- Oscillation cycle ~6–8 steps; hypothesis: may stabilise after 100 steps once model finds short reliable solution
+
+**KL loss attempt (rejected)**:
+Tried `use_kl_loss=True, kl_loss_coef=0.001` to anchor policy to reference model.
+SDPO explicitly rejects this at startup: `ValueError: SDPO cannot share the reference
+policy with KL regularization.` — because `teacher_module = ref_module_fsdp` in
+`fsdp_workers.py:905`. The EMA teacher IS the reference model; KL against it is
+architecturally incoherent. Reverted.
+
+#### Config changes to condition A (`train_oneshot_sdpo_nofeedback.slurm`)
+
+| Parameter | Before | After | Reason |
+|---|---|---|---|
+| `total_training_steps` | 75 | **120** | Test stabilisation hypothesis; 120 steps ≈ 13.4h within 16h |
+| `teacher_update_rate` | 0.01 | **0.05** | Reverted to paper default; 0.01 did not improve oscillation |
+| `norm_adv_by_std_in_grpo` | True | **False** | Unnormalized preserves reward scale; normalizing by std suppresses signal during low-variance early training |
+| `ppo_max_token_len_per_gpu` | 4096 | **8000** | Response lengths hit 1300+ tokens; 4096 caused silent OOM in teacher forward at saturation |
+
+#### `reward/math_reward.py` — remove feedback key from validation
+
+`feedback` key now only present in return dict when `data_source == "deepscaler"`
+AND `score == 0.0`. Previously always present (as `""` for val/correct), polluting
+validation JSONL with a meaningless column. Validation (`lighteval/MATH`) and correct
+answers now return `{"score": ..., "extracted_answer": ...}` only.
+
+---
+
 ## Current State
 
 - **Branch**: `claude/integrate-rlvr-sdpo-dlMU5`
-- **Status**: Ready to resubmit
+- **Status**: Ready to submit (condition A fresh run)
 - **Commands**:
-  - `sbatch scripts/train_oneshot_sdpo.slurm` — condition D, resumes from global_step_20, runs steps 21–90
-  - `sbatch scripts/train_oneshot_sdpo_nofeedback.slurm` — condition A, fresh run, steps 1–90
-- **Config**: 2× A100-40GB, 90 steps, train_batch=128, rollout.n=8, 16h wall time
-- **Measured timing**: ~579s/step (~9.7 min); 90 steps ≈ 14.6h
-- **Checkpoint available**: `output/checkpoints/global_step_20` (from first run)
+  - `sbatch scripts/train_oneshot_sdpo_nofeedback.slurm` — condition A, fresh run, 120 steps
+  - `sbatch scripts/train_oneshot_sdpo.slurm` — condition D, resumes from global_step_20, 90 steps
+- **Config (condition A)**: 2× A100-40GB, 120 steps, train_batch=128, rollout.n=8, 16h wall time
+- **Measured timing**: ~579s/step (~9.7 min); 120 steps ≈ 19.4h → may need to interrupt; watch step ~100
+- **Key metrics to watch**: `clip_ratio` (must drop <10% for train to stabilise), `success_group_fraction`
+- **Checkpoint available**: `output/checkpoints/global_step_20` (condition D, from prior run)

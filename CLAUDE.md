@@ -102,8 +102,8 @@ Key differences vs our SDPO implementation:
 | max_model_len | not set (old verl) | 8192 |
 | val_kwargs.n | not set | 1 |
 | Reprompting | N/A | EMA teacher reprompts failed rollouts |
-| Teacher | N/A (ref model) | EMA of student (update_rate=0.01) |
-| Feedback | N/A | condition D: sibling solution + verifier text |
+| Teacher | N/A (ref model) | EMA of student (update_rate=0.05) |
+| Feedback | N/A | condition A: scalar-only (no feedback text) |
 
 ---
 
@@ -141,7 +141,8 @@ SDPO (Self-Distilled Policy Optimization) extends GRPO with:
 3. **Distillation loss**: Instead of pure policy gradient, the loss is a weighted KL
    between student and teacher token distributions on the reprompted trajectories.
    `alpha=1.0` gives pure reverse KL (mode-seeking: student imitates teacher's best
-   solution exactly). `alpha=0.5` gives symmetric JSD. We use `alpha=1.0`.
+   solution exactly). `alpha=0.5` gives symmetric JSD. Condition A uses `alpha=0.5`
+   (Section 3 paper default); condition D uses `alpha=1.0`.
 
 4. **Importance sampling correction** (`rollout_is=token`, threshold=2.0): Corrects
    for distribution shift between rollout-time and update-time policies.
@@ -162,11 +163,11 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | Key | SDPO default | Our override | Reason |
 |---|---|---|---|
 | `algorithm.adv_estimator` | `gae` | `grpo` | SDPO requires grpo (no critic) |
-| `algorithm.norm_adv_by_std_in_grpo` | `True` | `True` | Keep YAML default (std normalization active) |
+| `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` | Unnormalized advantages preserve absolute reward scale; normalizing by std suppresses the signal when reward variance is low during early training |
 | `trainer.logger` | `["console","wandb"]` | `["console","tensorboard"]` | No W&B on HPC |
 | `trainer.n_gpus_per_node` | `8` | `2` | Our A100 allocation |
 | `trainer.total_epochs` | `30` | `9999` | **Critical**: with 128-row dataset and batch_size=128, len(dataloader)=1 → epoch loop exits after 30 steps, ignoring total_training_steps. 9999 makes epoch loop infinite so total_training_steps controls termination |
-| `trainer.total_training_steps` | `null` | `90` | 16h ÷ ~579s/step (measured) ≈ 99 steps; 90 for safety |
+| `trainer.total_training_steps` | `null` | `120` (condition A) / `90` (condition D) | 16h ÷ ~579s/step ≈ 99 steps safe max; extended to 120 for condition A to test oscillation stabilisation hypothesis (≈13.4h) |
 | `trainer.resume_mode` | `disable` | `auto` (rich-feedback), `disable` (no-feedback) | Resume from global_step_20 checkpoint for rich-feedback run |
 | `trainer.val_before_train` | `True` | `True` | Keep baseline measurement |
 
@@ -185,13 +186,13 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.distillation_topk` | `100` | `100` (condition A) / `20` (condition D) | Condition A = Section 3 default; condition D = rich_feedback experiment setting |
 | `self_distillation.alpha` | `0.5` | `0.5` (condition A) / `1.0` (condition D) | Paper Table 12: Section 3 (scalar reward) uses JSD (α=0.5); Section 4 (rich feedback) uses reverse KL (α=1.0) |
 | `self_distillation.teacher_regularization` | `ema` | `ema` | Standard SDPO |
-| `self_distillation.teacher_update_rate` | `0.05` | `0.05` (condition A) / `0.01` (condition D) | Condition A = Section 3 default; condition D = rich_feedback experiment setting (slower EMA) |
+| `self_distillation.teacher_update_rate` | `0.05` | `0.05` (both conditions) | Paper/YAML default; 0.01 was tried for condition A but reverted — slower EMA did not improve early oscillation |
 | `self_distillation.is_clip` | `2` | `2.0` | Same as default |
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
 | `entropy_coeff` | `0` | `0.001` | Entropy bonus matching One-Shot-RLVR's KL coeff; prevents collapse |
 | `ppo_mini_batch_size` | `256` | `16` | 2 GPUs; keeps peak logit memory safe |
-| `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences up to 5120 tokens; 4096 bin ceiling prevents silent OOM |
+| `ppo_max_token_len_per_gpu` | — | `8000` | Raised from 4096: response lengths hit 1300+ tokens during training; 8000 matches working 4-GPU reference value; peak logit memory ~4.9 GB/GPU |
 | `optim.lr` | `1e-6` | `1e-6` (both conditions) | SDPO generalization uses 1e-5 at batch=32. We use batch=128 (4× larger) so LR scaled down to 1e-6 to keep effective update size equivalent. lr=1e-5 caused catastrophic val drop (30.6%→16%) at step 12. |
 | `optim.lr_warmup_steps` | `-1` | `0` (both conditions) | No warmup; LR is already conservative |
 
@@ -262,7 +263,10 @@ def compute_score(
     ground_truth,          # from parquet reward_model.ground_truth
     extra_info=None,       # NaiveRewardManager adds: num_turns, rollout_reward_scores, truncated
 ) -> dict:
-    # Returns: {"score": 0.0|1.0, "extracted_answer": str|None, "feedback": str}
+    # Training (data_source=="deepscaler"), wrong answer:
+    #   {"score": 0.0, "extracted_answer": str, "feedback": str}
+    # Training, correct answer OR validation (any source):
+    #   {"score": 1.0|0.0, "extracted_answer": str}   ← no "feedback" key
 ```
 
 `NaiveRewardManager` populates `extra_info` before calling us:
@@ -281,9 +285,10 @@ which then appear in the validation JSONL for debugging.
 # One-Shot-RLVR original (float return):
 return 1.  # or 0.
 
-# Our SDPO version (dict return — no is_correct!):
-return {"score": 1.0, "extracted_answer": model_answer, "feedback": ""}
-return {"score": 0.0, "extracted_answer": model_answer, "feedback": "<π₁ hint>"}
+# Our SDPO version (dict return — no is_correct!, feedback only for π₁ wrong answers):
+return {"score": 1.0, "extracted_answer": model_answer}               # correct — any source
+return {"score": 0.0, "extracted_answer": model_answer}               # wrong — val/non-deepscaler
+return {"score": 0.0, "extracted_answer": model_answer, "feedback": "<π₁ hint>"}  # wrong — π₁ training
 ```
 
 **Why no `is_correct` key**: SDPO's reward aggregator stacks `reward_extra_infos`
@@ -295,8 +300,12 @@ which `json.dumps` rejects with `TypeError`. `score=1.0/0.0` encodes correctness
 2. `grade_answer_sympy` — sympy symbolic equality
 3. `grade_answer_grader` — `math_equal()` from `reward/grader.py` (numeric tolerance, latex2sympy2, matrix equality); requires `latex2sympy2` + `regex` installed to `pkgs/`
 
-**`feedback` key** (condition D — currently active):
-`compute_score` returns a `feedback` string consumed by SDPO's reprompt template.
+**`feedback` key** (present only for π₁ training wrong answers):
+The `feedback` key is only included in the return dict when `data_source == "deepscaler"`
+AND `score == 0.0`. Validation (MATH-500) and correct answers never carry this key —
+omitting it keeps the validation JSONL clean.
+`compute_score` feeds `feedback` to SDPO's reprompt template (used when
+`include_environment_feedback=true`; ignored silently for condition A).
 Four-layer verifier in `_make_feedback()`:
 - **Layer 0**: no `\boxed{}` → format nudge
 - **Layer 1**: generic wrong answer → `"Your answer {X} is incorrect."`
@@ -413,6 +422,7 @@ PY
 | `fatal: not a git repository` on login node | `/home/woody` is a separate filesystem mount | `GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull ...` or add to `~/.bashrc` |
 | Training stops at ~30 steps despite `total_training_steps=1200` | `ppo_trainer.yaml` default `total_epochs=30`; with 1-batch dataset the epoch loop exhausts after 30 steps, `total_training_steps` never reached | `trainer.total_epochs=9999` — makes epoch loop infinite; `total_training_steps` controls via `is_last_step` |
 | Crash when reprompt > `max_reprompt_len` | `reprompt_truncation` defaults to `"error"` in `ray_trainer.py:333`; tokenizer raises on truncation | `self_distillation.reprompt_truncation=left` — silently truncates from left |
+| `ValueError: SDPO cannot share the reference policy with KL regularization.` | `main_ppo.py:133` explicitly rejects `use_kl_loss=True` because `teacher_module = ref_module_fsdp` — the ref IS the teacher; KL against it is incoherent | Do not set `use_kl_loss=True`; SDPO uses JSD distillation instead |
 
 ---
 
