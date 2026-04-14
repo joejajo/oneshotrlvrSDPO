@@ -398,17 +398,52 @@ loss already prevents collapse. Reverting to `entropy_coeff=0` (SDPO default).
 
 ---
 
+---
+
+### 2026-04-14 — Fix OOM: reduce ppo_max_token_len_per_gpu to 4096; fix KeyError: feedback
+
+**Files**: `scripts/train_oneshot_sdpo_paper_sec3.slurm`, `scripts/train_oneshot_sdpo_nofeedback.slurm`, `reward/math_reward.py`
+
+#### paper_sec3 OOM at step 5 (teacher forward logsumexp)
+
+Job crashed: `torch.OutOfMemoryError: Tried to allocate 7.93 GiB. GPU 0 has 6.99 GiB free.`
+
+**Root cause**: `ppo_max_token_len_per_gpu=8000` allows 2 student sequences of ~4096 tokens per
+micro-batch. But teacher sequences are longer — reprompted context adds reprompt (2048) to prompt
+(1024) + response (3072) = **6144 teacher tokens per sequence**. Two teacher sequences need:
+`2 × 6144 × 151936 vocab × 4 bytes = 7.47 GB` → OOM with only 6.99 GB free.
+
+**Fix**: `ppo_max_token_len_per_gpu=4096` → at most 1 student sequence per micro-batch (student max
+= 1024 + 3072 = 4096 tokens). Teacher forward for 1 sequence: `6144 × 151936 × 4 = 3.73 GB` → fits.
+
+Applied to both `paper_sec3` and `nofeedback` (condition A) — same OOM would hit condition A at
+saturation when response lengths grow to 1300+ tokens.
+
+Condition D (`train_oneshot_sdpo.slurm`) already had `ppo_max_token_len_per_gpu=4096` — no change.
+
+`paper_sec3` changed to `resume_mode=auto` — valid checkpoint exists at `output_sec3/checkpoints/global_step_4`.
+
+#### KeyError: 'feedback' in agent_loop (prior fix in same session)
+
+`agent_loop.py:774` builds `non_tensor_batch[key]` from all samples in a batch and expects
+uniform keys. Previously `feedback` was conditional (only wrong deepscaler answers). Within a
+batch mixing correct + wrong answers the list comprehension crashed.
+
+Fix: `compute_score` now always returns `feedback` key — `""` for correct answers and
+non-training sources (MATH-500 val), real diagnostic string for wrong π₁ training answers.
+
+---
+
 ## Current State
 
 - **Branch**: `claude/integrate-rlvr-sdpo-dlMU5`
 - **Status**: Three scripts ready to submit
 - **Commands**:
+  - `sbatch scripts/train_oneshot_sdpo_paper_sec3.slurm` — paper §3, resumes from global_step_4, 200 steps
   - `sbatch scripts/train_oneshot_sdpo_nofeedback.slurm` — condition A, fresh run, 120 steps
   - `sbatch scripts/train_oneshot_sdpo.slurm` — condition D, resumes from global_step_20, 90 steps
-  - `sbatch scripts/train_oneshot_sdpo_paper_sec3.slurm` — paper Section 3 exact, fresh run, 200 steps
-- **Config (condition A)**: 2× A100-40GB, 120 steps, train_batch=128, rollout.n=8, no entropy
-- **Config (paper sec3)**: 2× A100-40GB, 200 steps, train_batch=32, rollout.n=8, temp=1.0, no entropy; ~7.8h
-- **Measured timing (condition A)**: ~579s/step (~9.7 min); 120 steps ≈ 19.4h → may need to interrupt
-- **Estimated timing (paper sec3)**: ~140s/step; 200 steps ≈ 7.8h — fits well within 16h
-- **Key metrics to watch**: `clip_ratio` (must drop <10% for train to stabilise), `success_group_fraction`
-- **Checkpoint available**: `output/checkpoints/global_step_20` (condition D, from prior run)
+- **Config (paper sec3)**: batch=32, temp=1.0, lr=1e-5, no entropy, norm_adv=True; ~115s/step; 200 steps ≈ 6.4h
+- **Config (condition A)**: batch=128, temp=0.6, lr=1e-6, no entropy; ~579s/step; 120 steps ≈ 19.4h
+- **ppo_max_token_len_per_gpu**: 4096 for all three scripts (safe limit for teacher forward)
+- **Key metrics to watch**: `clip_ratio` (must drop <10%), `success_group_fraction`, `critic/score/mean`
+- **Checkpoints**: `output_sec3/global_step_4` (paper §3), `output/global_step_20` (condition D)
