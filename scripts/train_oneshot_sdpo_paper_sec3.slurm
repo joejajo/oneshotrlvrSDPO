@@ -131,7 +131,7 @@ echo "================================================================"
 #   rollout.temperature=1.0   (paper uses temp=1.0; condition A uses 0.6)
 #   data.train_batch_size=32  (paper uses 32; condition A uses 128)
 #   optim.lr=1e-5             (paper lr for batch=32; condition A uses 1e-6 scaled for batch=128)
-#   entropy_coeff=0           (paper has no entropy term; condition A uses 0.001)
+#   entropy_coeff=0           (paper has no entropy term; all conditions now use 0)
 #   norm_adv_by_std_in_grpo=True  (paper/YAML default; condition A uses False)
 #
 # Shared with condition A (confirmed against SDPO paper Section 3 / Table 4):
