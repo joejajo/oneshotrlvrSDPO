@@ -502,16 +502,43 @@ student sequences, matching ppo_max_token_len_per_gpu exactly.
 
 ---
 
+---
+
+---
+
+### 2026-04-15 — New v2 scripts with fresh output dirs
+
+**Files**: `scripts/train_sdpo_sec3.slurm` (new), `scripts/train_sdpo_nofb.slurm` (new),
+`scripts/train_sdpo_rich.slurm` (new)
+
+Created v2 scripts for all three conditions with:
+- New output directories (`output_sec3_v2/`, `output_nofb_v2/`, `output_rich_v2/`)
+- `resume_mode=disable` for all (old checkpoints used broken ppo_mini_batch_size=16)
+- Cleaner names and updated echo banners
+- `max_actor_ckpt_to_keep=3` (vs 1 in old scripts) to keep more checkpoints
+
+Old scripts (`train_oneshot_sdpo*.slurm`) are kept for reference but should not be run.
+
+| New script | Condition | Output dir | Key settings |
+|---|---|---|---|
+| `train_sdpo_sec3.slurm` | Paper §3 | `output_sec3_v2/` | batch=32, temp=1.0, lr=1e-5, 300 steps |
+| `train_sdpo_nofb.slurm` | A (scalar) | `output_nofb_v2/` | batch=128, temp=0.6, lr=1e-6, 120 steps |
+| `train_sdpo_rich.slurm` | D (rich) | `output_rich_v2/` | batch=128, temp=0.6, lr=1e-6, 90 steps |
+
+---
+
 ## Current State
 
 - **Branch**: `claude/sdpo-example-implementation-vABmv`
-- **Status**: Three scripts ready to submit (ppo_mini_batch_size=256 in all)
-- **Commands**:
-  - `sbatch scripts/train_oneshot_sdpo_paper_sec3.slurm` — paper §3, resumes from global_step_4, 300 steps
-  - `sbatch scripts/train_oneshot_sdpo_nofeedback.slurm` — condition A, fresh run, 120 steps
-  - `sbatch scripts/train_oneshot_sdpo.slurm` — condition D, resumes from global_step_20, 90 steps
-- **Config (paper sec3)**: batch=32, temp=1.0, lr=1e-5, no entropy, norm_adv=True, ppo_mini_batch_size=256; 1 optimizer step/train-step
-- **Config (condition A)**: batch=128, temp=0.6, lr=1e-6, no entropy, ppo_mini_batch_size=256; 4 optimizer steps/train-step
-- **ppo_max_token_len_per_gpu**: 4096 for all three scripts (safe limit for teacher forward)
+- **Status**: Three v2 scripts ready — all fresh runs, ppo_mini_batch_size=256
+- **Recommended first run**: `sbatch scripts/train_sdpo_sec3.slurm`
+  - Most stable: batch=32 → exactly 1 optimizer step per training step
+  - Paper-validated: temp=1.0, lr=1e-5, norm_adv=True, JSD (alpha=0.5)
+  - 300 steps ≈ 11.7h (fits in 16h)
+- **Commands** (in order of recommended priority):
+  1. `sbatch scripts/train_sdpo_sec3.slurm`  — paper §3, fresh, 300 steps, ~11.7h
+  2. `sbatch scripts/train_sdpo_nofb.slurm`  — condition A, fresh, 120 steps, ~19.3h
+  3. `sbatch scripts/train_sdpo_rich.slurm`  — condition D, fresh, 90 steps, ~14.5h
+- **ppo_mini_batch_size**: 256 in all v2 scripts (4 optimizer steps/step for batch=128; 1 for batch=32)
+- **ppo_max_token_len_per_gpu**: 4096 for all (teacher forward: 6144 tok × vocab × 4B = 3.73 GB/GPU)
 - **Key metrics to watch**: `clip_ratio` (<10%), `rollout_is_max` (<3.0), `success_group_fraction`, `critic/score/mean`
-- **Checkpoints**: `output_sec3/global_step_4` (paper §3), `output/global_step_20` (condition D)
