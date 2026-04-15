@@ -191,7 +191,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
 | `entropy_coeff` | `0` | not overridden | Restored to SDPO default (0); original SDPO loss has no entropy term |
-| `ppo_mini_batch_size` | `256` | `16` | 2 GPUs; keeps peak logit memory safe |
+| `ppo_mini_batch_size` | `256` | `256` | Restored to SDPO default. With `use_dynamic_bsz=True`, memory is bounded by `ppo_max_token_len_per_gpu`, not mini-batch size. Setting 16 caused 64 optimizer steps/training-step → IS drift (rollout_is_max=13.69). At 256: cond A/D = 4 steps/train-step; paper §3 = 1 step/train-step (full-batch). |
 | `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences = prompt(1024)+reprompt(2048)+response(3072) = 6144 tokens; at 4096 budget at most 1 student seq per micro-batch → teacher logsumexp = 6144×151936×4 = 3.73 GB; fits on 2×A100-40GB with vLLM reserved |
 | `optim.lr` | `1e-6` | `1e-6` (both conditions) | SDPO generalization uses 1e-5 at batch=32. We use batch=128 (4× larger) so LR scaled down to 1e-6 to keep effective update size equivalent. lr=1e-5 caused catastrophic val drop (30.6%→16%) at step 12. |
 | `optim.lr_warmup_steps` | `-1` | `0` (both conditions) | No warmup; LR is already conservative |

@@ -434,16 +434,84 @@ non-training sources (MATH-500 val), real diagnostic string for wrong π₁ trai
 
 ---
 
+---
+
+---
+
+### 2026-04-15 — Fix IS drift: restore ppo_mini_batch_size=256; fix condition A max_response_length
+
+**Files**: `scripts/train_oneshot_sdpo_nofeedback.slurm`, `scripts/train_oneshot_sdpo_paper_sec3.slurm`,
+`scripts/train_oneshot_sdpo.slurm`, `CLAUDE.md`
+
+#### Root cause of condition A oscillation (rollout_is_max=13.69, clip_ratio=29.1%)
+
+All three scripts had `ppo_mini_batch_size=16`, overriding actor.yaml default of `256`.
+With `use_dynamic_bsz=True`, memory is controlled by `ppo_max_token_len_per_gpu=4096`,
+**not** by `ppo_mini_batch_size`. Reducing mini-batch size to 16 did not save GPU memory —
+it only caused 16× more optimizer steps per training step:
+
+```
+batch=128, n=8 → 1024 sequences per step
+ppo_mini_batch_size=16  → 1024/16 = 64 optimizer steps/step  ← 16× over-training
+ppo_mini_batch_size=256 → 1024/256 =  4 optimizer steps/step  ← correct
+batch=32,  n=8 → 256 sequences per step (paper §3)
+ppo_mini_batch_size=256 → 256/256  =  1 optimizer step/step   ← full-batch, paper default
+```
+
+After 64 sequential gradient updates on the same rollout data, π_current has drifted
+far from π_old. IS ratio `exp(log π_current − log π_old)` spiked to 13.69 at step 14;
+clip_ratio=29.1% at step 6 — most tokens had clipped/stale gradients.
+
+**Why ppo_mini_batch_size was progressively reduced** (from CHANGES.md history):
+It was reduced for "OOM" reasons, but the logic was wrong. The thinking was:
+`fewer sequences/mini-batch → less memory`. This holds for static batching, but with
+`use_dynamic_bsz=True` the actual GPU memory per sub-batch is fixed at
+`ppo_max_token_len_per_gpu=4096` tokens regardless of mini-batch size. The OOM was
+already solved by setting `ppo_max_token_len_per_gpu=4096`. Reducing ppo_mini_batch_size
+further was unnecessary and harmful.
+
+#### Peak memory with ppo_mini_batch_size=256 (unchanged from 16)
+
+`use_dynamic_bsz=True` processes one sub-batch at a time:
+```
+for each mini-batch of 256 sequences:
+    for each sub-batch of ~1 sequence (~4096 tokens per GPU):
+        teacher forward: 6144 tok × 151936 vocab × 4B = 3.73 GB/GPU ← peak
+        backward → accumulate gradient
+    optimizer.step()
+```
+Peak GPU memory = 3.73 GB for teacher logits (same as with mini_batch=16).
+Gradient buffer = model param size (unchanged regardless of accumulation window).
+
+#### Changes applied
+
+| Script | Parameter | Before | After |
+|---|---|---|---|
+| all three | `ppo_mini_batch_size` | `16` | `256` |
+| nofeedback (condition A) | `data.max_response_length` | `4096` | `3072` |
+
+`max_response_length=4096` in condition A was an anomaly (condition D and GRPO baseline
+both use 3072). Now all conditions use 3072 = prompt(1024)+response(3072) = 4096 token
+student sequences, matching ppo_max_token_len_per_gpu exactly.
+
+#### Expected effect
+
+- `clip_ratio` should stay <10% (was 29.1%)
+- `rollout_is_max` should stay <3.0 (was 13.69)
+- `critic/score/mean` should rise without step-6 collapse
+
+---
+
 ## Current State
 
-- **Branch**: `claude/integrate-rlvr-sdpo-dlMU5`
-- **Status**: Three scripts ready to submit
+- **Branch**: `claude/sdpo-example-implementation-vABmv`
+- **Status**: Three scripts ready to submit (ppo_mini_batch_size=256 in all)
 - **Commands**:
-  - `sbatch scripts/train_oneshot_sdpo_paper_sec3.slurm` — paper §3, resumes from global_step_4, 200 steps
+  - `sbatch scripts/train_oneshot_sdpo_paper_sec3.slurm` — paper §3, resumes from global_step_4, 300 steps
   - `sbatch scripts/train_oneshot_sdpo_nofeedback.slurm` — condition A, fresh run, 120 steps
   - `sbatch scripts/train_oneshot_sdpo.slurm` — condition D, resumes from global_step_20, 90 steps
-- **Config (paper sec3)**: batch=32, temp=1.0, lr=1e-5, no entropy, norm_adv=True; ~115s/step; 200 steps ≈ 6.4h
-- **Config (condition A)**: batch=128, temp=0.6, lr=1e-6, no entropy; ~579s/step; 120 steps ≈ 19.4h
+- **Config (paper sec3)**: batch=32, temp=1.0, lr=1e-5, no entropy, norm_adv=True, ppo_mini_batch_size=256; 1 optimizer step/train-step
+- **Config (condition A)**: batch=128, temp=0.6, lr=1e-6, no entropy, ppo_mini_batch_size=256; 4 optimizer steps/train-step
 - **ppo_max_token_len_per_gpu**: 4096 for all three scripts (safe limit for teacher forward)
-- **Key metrics to watch**: `clip_ratio` (must drop <10%), `success_group_fraction`, `critic/score/mean`
+- **Key metrics to watch**: `clip_ratio` (<10%), `rollout_is_max` (<3.0), `success_group_fraction`, `critic/score/mean`
 - **Checkpoints**: `output_sec3/global_step_4` (paper §3), `output/global_step_20` (condition D)

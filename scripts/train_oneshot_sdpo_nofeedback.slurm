@@ -184,7 +184,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=16 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=256 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
@@ -219,7 +219,7 @@ apptainer exec --nv \
     data.train_batch_size=128 \
     data.val_batch_size=64 \
     data.max_prompt_length=1024 \
-    data.max_response_length=4096 \
+    data.max_response_length=3072 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
     \
