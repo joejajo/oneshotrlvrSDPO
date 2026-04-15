@@ -519,11 +519,12 @@ def extract_answer(passage: str) -> str:
 # ---------------------------------------------------------------------------
 
 # latex2sympy2 generated parser targets ANTLR 4.7.2 but we install 4.9.3.
-# antlr4.Runtime.checkVersion() prints directly to stderr — PYTHONWARNINGS can't
-# suppress it. Monkey-patch before the import so the check is a no-op.
+# The generated code calls: RuntimeMetaData.checkVersion("4.7.2", RuntimeMetaData.VERSION)
+# antlr4.Runtime is a module; RuntimeMetaData is the class inside it that holds checkVersion.
+# Patch the class method before importing grader.py (which triggers latex2sympy2 parser load).
 try:
-    import antlr4.Runtime
-    antlr4.Runtime.checkVersion = lambda toolVersion: None
+    from antlr4.Runtime import RuntimeMetaData as _AntlrRMD
+    _AntlrRMD.checkVersion = classmethod(lambda cls, *args: None)
 except Exception:
     pass
 
