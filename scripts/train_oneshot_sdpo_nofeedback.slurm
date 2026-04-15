@@ -1,18 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=sdpo_nofb
+#SBATCH --job-name=oneshot_sdpo_nofb
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_nofb_v2/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_nofb_v2/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_nofb/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_nofb/logs/train_%j.err
 
 set -euo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_nofb_v2
+OUTPUT_ROOT=${PROJECT_ROOT}/output_nofb
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -94,6 +94,12 @@ export PYTHONWARNINGS="ignore:Unsupported processor type"
 # "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
 export TMPDIR=/tmp
 
+# NOTE: expandable_segments:True was previously set here to fix fragmentation OOM at
+# π₁ saturation (~step 11). Removed because vLLM v1's CuMemAllocator explicitly
+# forbids it: "Expandable segments are not compatible with memory pool"
+# (vllm/device_allocator/cumem.py). OOM fragmentation is now mitigated solely by
+# ppo_mini_batch_size=16 (halved again for 2-GPU run), which keeps peak logit memory ~4.87 GB/GPU.
+
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
 # Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
 export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
@@ -109,7 +115,7 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  SDPO training  [Condition A — scalar-only, no feedback, v2 fresh run]"
+echo "  One-Shot-RLVR + SDPO training  [NO RICH FEEDBACK — condition A]"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -121,16 +127,28 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
-# ── Condition A — scalar-only, no text feedback ───────────────────────────────
+# ── No rich feedback — SDPO Section 3 scalar setting ─────────────────────────
 #
-# SDPO with EMA teacher + sibling reprompt, no environment feedback text.
-# Fresh run (resume_mode=disable). ppo_mini_batch_size=256 (actor.yaml default).
+# include_environment_feedback=false
 #
-#   batch=128, temp=0.6, lr=1e-6, norm_adv=False, alpha=0.5 (JSD), topk=100
-#   ppo_mini_batch_size=256 → 1024/256 = 4 optimizer steps per training step
-#   max_response_length=3072 (aligned with condition D and GRPO baseline)
+# The environment returns only a scalar reward (1 or 0).  There is no text
+# feedback: no "Your answer X is incorrect", no localized verifier hint,
+# no sample solution in the reprompt.
 #
-# Step budget: ~579s/step × 120 steps ≈ 19.3h; fits in 16h with early stopping.
+# SDPO still runs fully: the EMA teacher reprompts failed rollouts using a
+# *successful sibling rollout* from the same group of 8 as the implicit
+# demonstration.  The teacher re-processes [question + sibling solution] and
+# assigns per-token credit to that sequence, which the student distils via
+# Jensen-Shannon divergence (alpha=0.5, per paper Table 12 Section 3).
+# The scalar reward drives the GRPO advantage; the
+# distillation loss provides token-level supervision on HOW the correct answer
+# was reached — all without any text hint about what went wrong.
+#
+# Hyperparameters match SDPO paper Section 3 (scalar reward, Table 4 defaults):
+#   alpha=0.5 (JSD), teacher_update_rate=0.05, distillation_topk=100
+#
+# This is condition A in our ablation (see train_oneshot_sdpo.slurm for B/C/D).
+# It matches the SDPO paper Section 3 math/scalar-reward regime exactly.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -217,7 +235,7 @@ apptainer exec --nv \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=sdpo_nofb_v2 \
+    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_nofb \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.resume_mode=disable \

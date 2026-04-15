@@ -1,18 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=oneshot_sdpo_sec3
+#SBATCH --job-name=sdpo_rich
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sec3/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sec3/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_rich_v2/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_rich_v2/logs/train_%j.err
 
 set -euo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_sec3
+OUTPUT_ROOT=${PROJECT_ROOT}/output_rich_v2
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -94,6 +94,12 @@ export PYTHONWARNINGS="ignore:Unsupported processor type"
 # "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
 export TMPDIR=/tmp
 
+# NOTE: expandable_segments:True was previously set here to fix fragmentation OOM at
+# π₁ saturation (~step 11). Removed because vLLM v1's CuMemAllocator explicitly
+# forbids it: "Expandable segments are not compatible with memory pool"
+# (vllm/device_allocator/cumem.py). OOM fragmentation is now mitigated solely by
+# ppo_mini_batch_size=256 + ppo_max_token_len_per_gpu=4096.
+
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
 # Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
 export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
@@ -109,7 +115,7 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  One-Shot-RLVR + SDPO training  [Paper Section 3 — exact settings]"
+echo "  SDPO training  [Condition D — rich feedback, v2 fresh run]"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -121,37 +127,20 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
-# ── SDPO Paper Section 3 — scalar reward, exact hyperparameters ──────────────
+# ── Condition D — rich feedback (sibling solution + localized verifier) ───────
 #
-# This script reproduces the SDPO paper Section 3 (Table 4) setting as closely
-# as possible on the One-Shot-RLVR π₁ task.
+# SDPO with EMA teacher + rich reprompt: successful sibling solution AND
+# localized verifier text (four-layer π₁ feedback from math_reward.py).
+# Fresh run (resume_mode=disable). ppo_mini_batch_size=256 (actor.yaml default).
 #
-# Key differences vs our condition A (train_oneshot_sdpo_nofeedback.slurm):
+#   batch=128, temp=0.6, lr=1e-6, norm_adv=True, alpha=1.0 (reverse KL), topk=20
+#   ppo_mini_batch_size=256 → 1024/256 = 4 optimizer steps per training step
+#   include_environment_feedback=true, environment_feedback_only_without_solution=false
 #
-#   rollout.temperature=1.0   (paper uses temp=1.0; condition A uses 0.6)
-#   data.train_batch_size=32  (paper uses 32; condition A uses 128)
-#   optim.lr=1e-5             (paper lr for batch=32; condition A uses 1e-6 scaled for batch=128)
-#   entropy_coeff=0           (paper has no entropy term; all conditions now use 0)
-#   norm_adv_by_std_in_grpo=True  (paper/YAML default; condition A uses False)
+# Reprompt = question + "Correct solution: ..." + "Feedback: ..." + "Solve again."
+# Teacher re-evaluates original failed tokens conditioned on augmented context.
 #
-# Shared with condition A (confirmed against SDPO paper Section 3 / Table 4):
-#   alpha=0.5                 (JSD = symmetric KL; Section 3 "scalar reward" setting)
-#   teacher_update_rate=0.05  (EMA τ=0.05; paper/YAML default)
-#   distillation_topk=100     (Section 3 default; condition D uses 20)
-#   include_environment_feedback=false  (scalar-only; no text feedback)
-#   is_clip=2.0               (IS weight truncation)
-#   rollout.n=8               (group size G=8)
-#
-# SDPO loss (Section 3 scalar reward, no entropy):
-#   L = α·KL(m‖π_teacher) + (1-α)·KL(m‖π_student)    [m = mixture dist]
-#   where α=0.5 → symmetric JSD
-#   Importance sampling: ratio = exp(log π_student − log π_old), clipped at is_clip=2.0
-#   Top-k=100 tokens per position + uniform tail bucket
-#   Policy gradient advantage (GRPO): normalised by std (norm_adv_by_std_in_grpo=True)
-#
-# Step budget:
-#   batch=32, ~4 prompts/step (128 prompts / 32 batch), ~140s/step → 300 steps ≈ 11.7h
-#   16h wall time gives headroom for startup. Validation is in-memory (Hybrid Engine weight sync), essentially free.
+# Step budget: ~579s/step × 90 steps ≈ 14.5h; fits in 16h wall time.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -171,7 +160,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
-    actor_rollout_ref.rollout.temperature=1.0 \
+    actor_rollout_ref.rollout.temperature=0.6 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
@@ -179,37 +168,35 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
-    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
-    actor_rollout_ref.rollout.val_kwargs.top_p=1.0 \
-    actor_rollout_ref.rollout.val_kwargs.do_sample=False \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
+    actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.agent.num_workers=1 \
     \
-    actor_rollout_ref.actor.optim.lr=1e-5 \
+    actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    actor_rollout_ref.actor.entropy_coeff=0 \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
-    actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
+    actor_rollout_ref.actor.self_distillation.include_environment_feedback=true \
+    actor_rollout_ref.actor.self_distillation.environment_feedback_only_without_solution=false \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
-    actor_rollout_ref.actor.self_distillation.alpha=0.5 \
+    actor_rollout_ref.actor.self_distillation.alpha=1.0 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
-    actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
+    actor_rollout_ref.actor.self_distillation.distillation_topk=20 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
-    'actor_rollout_ref.actor.self_distillation.reprompt_template="{prompt}\n\nCorrect solution: {solution}\n\nCorrectly solve the original question."' \
-    'actor_rollout_ref.actor.self_distillation.solution_template="{successful_previous_attempt}"' \
     \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     \
@@ -220,7 +207,7 @@ apptainer exec --nv \
     \
     data.train_files="[${TRAIN_PARQUET}]" \
     data.val_files="[${EVAL_PARQUET}]" \
-    data.train_batch_size=32 \
+    data.train_batch_size=128 \
     data.val_batch_size=64 \
     data.max_prompt_length=1024 \
     data.max_response_length=3072 \
@@ -234,18 +221,18 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=300 \
+    trainer.total_training_steps=90 \
     trainer.save_freq=10 \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_sec3 \
+    trainer.experiment_name=sdpo_rich_v2 \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
-    trainer.resume_mode=auto \
+    trainer.resume_mode=disable \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
-    trainer.max_actor_ckpt_to_keep=1 \
+    trainer.max_actor_ckpt_to_keep=3 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=2147483648 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"

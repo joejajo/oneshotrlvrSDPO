@@ -1,18 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=sdpo_rich
+#SBATCH --job-name=oneshot_sdpo
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_rich_v2/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_rich_v2/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
 
 set -euo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_rich_v2
+OUTPUT_ROOT=${PROJECT_ROOT}/output
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -98,7 +98,7 @@ export TMPDIR=/tmp
 # π₁ saturation (~step 11). Removed because vLLM v1's CuMemAllocator explicitly
 # forbids it: "Expandable segments are not compatible with memory pool"
 # (vllm/device_allocator/cumem.py). OOM fragmentation is now mitigated solely by
-# ppo_mini_batch_size=256 + ppo_max_token_len_per_gpu=4096.
+# ppo_mini_batch_size=16 (halved again for 2-GPU run), which keeps peak logit memory ~4.87 GB/GPU.
 
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
 # Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
@@ -115,7 +115,7 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  SDPO training  [Condition D — rich feedback, v2 fresh run]"
+echo "  One-Shot-RLVR + SDPO training"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -127,23 +127,54 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
-# ── Condition D — rich feedback (sibling solution + localized verifier) ───────
+# ── Feedback ablation conditions ─────────────────────────────────────────────
+# Four conditions to compare (same checkpoint, prompts, rollout count, seed):
 #
-# SDPO with EMA teacher + rich reprompt: successful sibling solution AND
-# localized verifier text (four-layer π₁ feedback from math_reward.py).
-# Fresh run (resume_mode=disable). ppo_mini_batch_size=256 (actor.yaml default).
+#   A. Scalar-only baseline
+#      include_environment_feedback=false
+#      (no feedback; pure GRPO-style advantage signal)
 #
-#   batch=128, temp=0.6, lr=1e-6, norm_adv=True, alpha=1.0 (reverse KL), topk=20
-#   ppo_mini_batch_size=256 → 1024/256 = 4 optimizer steps per training step
-#   include_environment_feedback=true, environment_feedback_only_without_solution=false
+#   B. Generic feedback
+#      include_environment_feedback=true
+#      environment_feedback_only_without_solution=true
+#      feedback returns: "Your answer X is incorrect."  [Layer 1 only]
 #
-# Reprompt = question + "Correct solution: ..." + "Feedback: ..." + "Solve again."
-# Teacher re-evaluates original failed tokens conditioned on augmented context.
+#   C. Localized verifier, no solution
+#      include_environment_feedback=true
+#      environment_feedback_only_without_solution=true
+#      feedback returns: "V³=2048 correct, ∛2048 ≠ X" when detectable  [Layer 2]
 #
-# Step budget: ~579s/step × 90 steps ≈ 14.5h; fits in 16h wall time.
+#   D. Localized verifier + sample solution
+#      include_environment_feedback=true
+#      environment_feedback_only_without_solution=false
+#      Full Table 2 template: solution + localized feedback in reprompt
+#
+# CURRENT CONFIG: condition D (include_environment_feedback=true, with solution)
+#   See train_oneshot_sdpo_nofeedback.slurm for condition A (scalar-only).
+#
+# To run condition B: change math_reward.py _make_feedback to skip Layer 2
+#   (comment out the `if data_source == "deepscaler"` block)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
+# Config base: ppo_trainer
+#   Using --config-name ppo_trainer (NOT sdpo).
+#   sdpo.yaml inherits user.yaml which requires TASK and EXPERIMENT env vars
+#   specific to the CSCS cluster. ppo_trainer.yaml is cluster-neutral.
+#   All SDPO-specific keys are set explicitly below.
+#
+# SDPO keys (absent from ppo_trainer.yaml, must be set explicitly):
+#   actor_rollout_ref.actor.policy_loss.loss_mode=sdpo
+#   algorithm.adv_estimator=grpo
+#   algorithm.norm_adv_by_std_in_grpo=True
+#   algorithm.rollout_correction.rollout_is=token
+#   algorithm.rollout_correction.rollout_is_threshold=2.0
+#   actor_rollout_ref.rollout.calculate_log_probs=True
+#   actor_rollout_ref.actor.self_distillation.*
+#
+# val_kwargs: pre-declared in rollout.yaml with correct defaults
+#   (temperature=0, n=1, do_sample=False) — no override needed.
+
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
 
 apptainer exec --nv \
@@ -226,13 +257,13 @@ apptainer exec --nv \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=sdpo_rich_v2 \
+    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1 \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
-    trainer.resume_mode=disable \
+    trainer.resume_mode=auto \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
-    trainer.max_actor_ckpt_to_keep=3 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=2147483648 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"

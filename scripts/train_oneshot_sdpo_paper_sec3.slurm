@@ -1,18 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=sdpo_sec3
+#SBATCH --job-name=oneshot_sdpo_sec3
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sec3_v2/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sec3_v2/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sec3/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sec3/logs/train_%j.err
 
 set -euo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_sec3_v2
+OUTPUT_ROOT=${PROJECT_ROOT}/output_sec3
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -109,7 +109,7 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  SDPO training  [Paper Section 3 — scalar reward, v2 fresh run]"
+echo "  One-Shot-RLVR + SDPO training  [Paper Section 3 — exact settings]"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -123,14 +123,35 @@ echo "================================================================"
 
 # ── SDPO Paper Section 3 — scalar reward, exact hyperparameters ──────────────
 #
-# Reproduces SDPO paper Section 3 (Table 4) on the One-Shot-RLVR π₁ task.
-# Fresh run (resume_mode=disable). ppo_mini_batch_size=256 (actor.yaml default).
+# This script reproduces the SDPO paper Section 3 (Table 4) setting as closely
+# as possible on the One-Shot-RLVR π₁ task.
 #
-#   batch=32, temp=1.0, lr=1e-5, norm_adv=True, alpha=0.5 (JSD), topk=100
-#   ppo_mini_batch_size=256 → 256/256 = 1 optimizer step per training step
-#   (full-batch actor update; paper-default dynamics)
+# Key differences vs our condition A (train_oneshot_sdpo_nofeedback.slurm):
 #
-# Step budget: ~140s/step × 300 steps ≈ 11.7h; fits in 16h wall time.
+#   rollout.temperature=1.0   (paper uses temp=1.0; condition A uses 0.6)
+#   data.train_batch_size=32  (paper uses 32; condition A uses 128)
+#   optim.lr=1e-5             (paper lr for batch=32; condition A uses 1e-6 scaled for batch=128)
+#   entropy_coeff=0           (paper has no entropy term; all conditions now use 0)
+#   norm_adv_by_std_in_grpo=True  (paper/YAML default; condition A uses False)
+#
+# Shared with condition A (confirmed against SDPO paper Section 3 / Table 4):
+#   alpha=0.5                 (JSD = symmetric KL; Section 3 "scalar reward" setting)
+#   teacher_update_rate=0.05  (EMA τ=0.05; paper/YAML default)
+#   distillation_topk=100     (Section 3 default; condition D uses 20)
+#   include_environment_feedback=false  (scalar-only; no text feedback)
+#   is_clip=2.0               (IS weight truncation)
+#   rollout.n=8               (group size G=8)
+#
+# SDPO loss (Section 3 scalar reward, no entropy):
+#   L = α·KL(m‖π_teacher) + (1-α)·KL(m‖π_student)    [m = mixture dist]
+#   where α=0.5 → symmetric JSD
+#   Importance sampling: ratio = exp(log π_student − log π_old), clipped at is_clip=2.0
+#   Top-k=100 tokens per position + uniform tail bucket
+#   Policy gradient advantage (GRPO): normalised by std (norm_adv_by_std_in_grpo=True)
+#
+# Step budget:
+#   batch=32, ~4 prompts/step (128 prompts / 32 batch), ~140s/step → 300 steps ≈ 11.7h
+#   16h wall time gives headroom for startup. Validation is in-memory (Hybrid Engine weight sync), essentially free.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -218,13 +239,13 @@ apptainer exec --nv \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=sdpo_sec3_v2 \
+    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_sec3 \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
-    trainer.resume_mode=disable \
+    trainer.resume_mode=auto \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
-    trainer.max_actor_ckpt_to_keep=3 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=2147483648 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
