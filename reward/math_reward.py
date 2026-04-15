@@ -520,13 +520,17 @@ def extract_answer(passage: str) -> str:
 
 # latex2sympy2 generated parser targets ANTLR 4.7.2 but we install 4.9.3.
 # The generated code calls: RuntimeMetaData.checkVersion("4.7.2", RuntimeMetaData.VERSION)
-# antlr4.Runtime is a module; RuntimeMetaData is the class inside it that holds checkVersion.
+# RuntimeMetaData lives in antlr4/RuntimeMetaData.py (not antlr4/Runtime.py).
 # Patch the class method before importing grader.py (which triggers latex2sympy2 parser load).
 try:
-    from antlr4.Runtime import RuntimeMetaData as _AntlrRMD
+    from antlr4.RuntimeMetaData import RuntimeMetaData as _AntlrRMD
     _AntlrRMD.checkVersion = classmethod(lambda cls, *args: None)
 except Exception:
-    pass
+    try:
+        from antlr4 import RuntimeMetaData as _AntlrRMD
+        _AntlrRMD.checkVersion = classmethod(lambda cls, *args: None)
+    except Exception:
+        pass
 
 try:
     from reward.grader import math_equal as _math_equal
