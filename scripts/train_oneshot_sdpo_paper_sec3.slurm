@@ -150,7 +150,7 @@ echo "================================================================"
 #   Policy gradient advantage (GRPO): normalised by std (norm_adv_by_std_in_grpo=True)
 #
 # Step budget:
-#   batch=32, ~4 prompts/step (128 prompts / 32 batch), ~140s/step → 200 steps ≈ 7.8h
+#   batch=32, ~4 prompts/step (128 prompts / 32 batch), ~140s/step → 300 steps ≈ 11.7h
 #   16h wall time gives headroom for startup. Validation is in-memory (Hybrid Engine weight sync), essentially free.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -234,7 +234,7 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=200 \
+    trainer.total_training_steps=300 \
     trainer.save_freq=10 \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
