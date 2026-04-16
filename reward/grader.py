@@ -20,7 +20,17 @@ import sys as _sys, io as _io
 _stderr, _sys.stderr = _sys.stderr, _io.StringIO()
 from latex2sympy2 import latex2sympy
 _sys.stderr = _stderr
-del _stderr, _sys, _io
+del _stderr
+
+def _latex2sympy_quiet(s):
+    """Wrapper that suppresses ANTLR version-mismatch stderr noise at call time."""
+    _old, _sys.stderr = _sys.stderr, _io.StringIO()
+    try:
+        return latex2sympy(s)
+    finally:
+        _sys.stderr = _old
+
+del _sys, _io
 
 # from .parser import choice_answer_clean, strip_string
 # from parser import choice_answer_clean
@@ -279,7 +289,7 @@ def numeric_equal(prediction: float, reference: float):
 
 def symbolic_equal(a, b):
     def _parse(s):
-        for f in [parse_latex, parse_expr, latex2sympy]:
+        for f in [parse_latex, parse_expr, _latex2sympy_quiet]:
             try:
                 return f(s.replace("\\\\", "\\"))
             except:
