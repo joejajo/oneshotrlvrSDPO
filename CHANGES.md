@@ -13,6 +13,29 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
+### 2026-04-16 — Fix condition D oscillation: greedy val + disable adv norm
+
+**Files**: `scripts/train_oneshot_sdpo.slurm`, `CLAUDE.md`
+
+**Problem**: val reward (`val-core/*/math500/reward/mean@1`) peaked at ~0.45 around step
+80–100, then crashed and oscillated between 0.37–0.44 for 170+ more steps. Two causes:
+
+1. **`norm_adv_by_std_in_grpo=True`** — near saturation (~60% accuracy), some batches
+   have near-zero reward std. GRPO divides advantages by std → near-zero divisor →
+   exploding advantage → large gradient step → policy overcorrects → val drops.
+   Condition A already had `=False`; condition D mistakenly had `=True`.
+
+2. **Stochastic val (`temperature=0.6, do_sample=True`)** — each evaluation step draws
+   a different sample, adding ±2–3pp noise per step. On a 500-problem eval this makes a
+   stable model look like it's oscillating.
+
+**Fixes applied to `train_oneshot_sdpo.slurm`**:
+- `algorithm.norm_adv_by_std_in_grpo=True` → `False`
+- `val_kwargs.temperature=0.6` → `0`, `top_p=0.95` → `1.0`, `do_sample=True` → `False`
+
+**Why not fix paper §3 script**: `norm_adv_by_std_in_grpo=True` is intentional there —
+it matches the paper's exact settings for comparison purposes.
+
 ### 2026-04-08 — Remove expandable_segments (incompatible with vLLM CuMemAllocator)
 
 **Files**: `scripts/train_oneshot_sdpo.slurm`
