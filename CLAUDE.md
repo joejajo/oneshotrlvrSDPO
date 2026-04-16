@@ -446,7 +446,7 @@ oneshotrlvrSDPO/
 │   └── grader.py                          ← math_equal() — third grading fallback
 │                                             requires latex2sympy2 + regex (in pkgs/)
 ├── pkgs/                                  ← packages not in container (pip --target)
-│   └── (latex2sympy2, regex, antlr4, ...) ← install: pip install --target=pkgs latex2sympy2 regex antlr4-python3-runtime==4.9.3
+│   └── (latex2sympy2, regex, antlr4, ...) ← install: pip install --target=pkgs latex2sympy2 regex antlr4-python3-runtime==4.7.2
 ├── eval/
 │   ├── eval_math500.py                    ← standalone MATH-500 eval
 │   └── eval_math500.slurm
@@ -504,7 +504,7 @@ GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git pull origin claude/integrate-rlvr-sdpo-dlM
 echo 'export GIT_DISCOVERY_ACROSS_FILESYSTEM=1' >> ~/.bashrc
 
 # One-time: install packages not in container
-pip install --target=${PROJECT_ROOT}/pkgs latex2sympy2 regex antlr4-python3-runtime==4.9.3
+pip install --target=${PROJECT_ROOT}/pkgs latex2sympy2 regex antlr4-python3-runtime==4.7.2
 
 # Production training — condition D (rich feedback), resumes from global_step_20
 sbatch scripts/train_oneshot_sdpo.slurm
