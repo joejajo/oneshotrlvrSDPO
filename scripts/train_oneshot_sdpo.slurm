@@ -199,9 +199,9 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
-    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
-    actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
-    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
+    actor_rollout_ref.rollout.val_kwargs.top_p=1.0 \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=False \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.agent.num_workers=1 \
     \
@@ -232,7 +232,7 @@ apptainer exec --nv \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     \
     algorithm.adv_estimator=grpo \
-    algorithm.norm_adv_by_std_in_grpo=True \
+    algorithm.norm_adv_by_std_in_grpo=False \
     algorithm.rollout_correction.rollout_is=token \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
     \

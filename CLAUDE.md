@@ -163,7 +163,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | Key | SDPO default | Our override | Reason |
 |---|---|---|---|
 | `algorithm.adv_estimator` | `gae` | `grpo` | SDPO requires grpo (no critic) |
-| `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` | Unnormalized advantages preserve absolute reward scale; normalizing by std suppresses the signal when reward variance is low during early training |
+| `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` (conditions A and D) / `True` (paper §3) | Unnormalized advantages preserve absolute reward scale; normalizing by std causes advantage explosion when reward variance drops near saturation (~60% accuracy) — observed as val oscillation after step 100 |
 | `trainer.logger` | `["console","wandb"]` | `["console","tensorboard"]` | No W&B on HPC |
 | `trainer.n_gpus_per_node` | `8` | `2` | Our A100 allocation |
 | `trainer.total_epochs` | `30` | `9999` | **Critical**: with 128-row dataset and batch_size=128, len(dataloader)=1 → epoch loop exits after 30 steps, ignoring total_training_steps. 9999 makes epoch loop infinite so total_training_steps controls termination |
@@ -205,6 +205,8 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `max_num_batched_tokens` | `8192` | `16384` | 2× for concurrent sequences |
 | `n` | `1` | `8` | 8 rollouts per prompt |
 | `val_kwargs.n` | `1` | `1` | Greedy pass@1 (n=16 too expensive on 500 problems) |
+| `val_kwargs.temperature` | `1.0` | `0` (all conditions) | **Greedy** evaluation — eliminates sampling noise (±2-3pp per step) that makes val curves look oscillating |
+| `val_kwargs.do_sample` | `True` | `False` (all conditions) | Required for greedy |
 | `temperature` | `1.0` | `0.6` | Qwen2.5-Math-1.5B recommended |
 | `gpu_memory_utilization` | `0.5` | `0.4` | Safe for hybrid actor+vLLM on 2×A100-40GB |
 | `tensor_model_parallel_size` | `2` | `1` | 1.5B model fits on 1 GPU |
@@ -319,7 +321,7 @@ Four-layer verifier in `_make_feedback()`:
 
 | Script | Condition | `include_env_feedback` | Teacher context | Notes |
 |---|---|---|---|---|
-| `train_oneshot_sdpo.slurm` | **D** | `true` | question + sibling solution + verifier text + original failed response | alpha=1.0, topk=20, batch=128, temp=0.6 |
+| `train_oneshot_sdpo.slurm` | **D** | `true` | question + sibling solution + verifier text + original failed response | alpha=1.0, topk=20, batch=128, temp=0.6, norm_adv=False, val greedy |
 | `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=128, temp=0.6, no entropy |
 | `train_oneshot_sdpo_paper_sec3.slurm` | **Paper §3** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=32, temp=1.0, **no entropy**, lr=1e-5, norm_adv=True |
 
