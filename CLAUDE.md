@@ -180,7 +180,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.include_environment_feedback` | `True` | `true` | **Condition D (current)**: rich feedback — sibling solution + verifier text |
 | `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | Include solution in reprompt (condition D) |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
-| `self_distillation.max_reprompt_len` | `10240` | `2048` | Caps reprompt length; truncation_side=left prevents crash |
+| `self_distillation.max_reprompt_len` | `10240` | `4096` | Caps reprompt length; truncation_side=left prevents crash |
 | `self_distillation.reprompt_truncation` | `"error"` | `left` | **Critical**: default "error" crashes when reprompt > max_reprompt_len; "left" truncates silently |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
 | `self_distillation.distillation_topk` | `100` | `100` (condition A) / `20` (condition D) | Condition A = Section 3 default; condition D = rich_feedback experiment setting |
@@ -192,7 +192,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
 | `entropy_coeff` | `0` | not overridden | Restored to SDPO default (0); original SDPO loss has no entropy term |
 | `ppo_mini_batch_size` | `256` | `16` | 2 GPUs; keeps peak logit memory safe |
-| `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences = prompt(1024)+reprompt(2048)+response(3072) = 6144 tokens; at 4096 budget at most 1 student seq per micro-batch → teacher logsumexp = 6144×151936×4 = 3.73 GB; fits on 2×A100-40GB with vLLM reserved |
+| `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences = prompt(1024)+reprompt(4096)+response(3072) = 8192 tokens; at 4096 budget at most 1 student seq per micro-batch → teacher logsumexp = 8192×151936×4 = 4.97 GB; fits on 2×A100-40GB with vLLM reserved |
 | `optim.lr` | `1e-6` | `1e-6` (both conditions) | SDPO generalization uses 1e-5 at batch=32. We use batch=128 (4× larger) so LR scaled down to 1e-6 to keep effective update size equivalent. lr=1e-5 caused catastrophic val drop (30.6%→16%) at step 12. |
 | `optim.lr_warmup_steps` | `-1` | `0` (both conditions) | No warmup; LR is already conservative |
 
