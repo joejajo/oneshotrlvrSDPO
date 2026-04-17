@@ -565,194 +565,61 @@ def grade_answer_grader(given_answer: str, ground_truth: str) -> bool:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Feedback for failed rollouts — four-layer verifier design.
+# Feedback for failed rollouts — environment-natural verifier output.
 #
+# Matches SDPO upstream verl/utils/reward_score/feedback/math.py verbatim.
 # The feedback string is SDPO's environment_output f_i.  It is placed into
 # the self-teacher prompt alongside the original question and (optionally) a
 # correct sibling rollout, then the original failed response is appended so
 # the teacher re-evaluates the old trajectory under feedback-augmented
 # context — NOT to generate a fresh answer (SDPO §3).
 #
-# Layer 1 — Generic (all problems):
-#   "Your answer X is incorrect."
-#   Minimal but names the wrong token so the teacher knows where to disagree.
+# Layer 0 — Truncated (response hit max_response_length without EOS):
+#   "Your response was truncated because it exceeded the maximum length."
+#   Takes priority over format check — a truncated response may not have
+#   a \boxed{} simply because generation was cut off.
 #
-# Layer 2a — π₁ verifier (data_source="deepscaler"):
-#   Intermediate V³=2048 is checkable.  Localises blame to cube-root tokens.
-#   → "V³=2048 is correct, but ∛2048 ≠ X. Re-check the cube root step."
-#   Does NOT reveal the correct answer.
+# Layer 1 — Format error (no \boxed{}, not truncated):
+#   "Your answer had the wrong format. The solution must be given in the
+#    format: \boxed{your_answer}."
 #
-# Layer 2b — Unit-ratio mismatch (all numeric answers):
-#   If model_answer / ground_truth matches a known unit-conversion factor
-#   (60=min↔hr, 1000=kilo, 12=inch↔ft, …) emit a compact unit diagnostic.
-#   → "Your answer X is incorrect; this may be a minutes↔hours unit mismatch."
-#   Uses ground_truth only to compute the ratio — answer not revealed.
-#
-# Layer 2c — Arithmetic transcription error:
-#   Looks for "= <number>" statements in the response tail that differ from
-#   the boxed answer, flagging copy-paste mistakes between steps.
-#   → "You stated = 48 but boxed 84; check for a transcription error."
-#
-# Layer 2d — Wrong quantity context:
-#   Finds the last quantity keyword (speed, time, distance, …) mentioned
-#   before \boxed{} to surface "solved for the wrong variable" errors.
-#   → "Your answer X is incorrect. You appear to have computed speed;
-#      check which quantity the question asks for."
-#
-# Ablation conditions (slurm script):
-#   A. Scalar-only:   include_environment_feedback=false   ← current primary
-#   B. Generic:       include_environment_feedback=true, Layer 1 only
-#   C. Full verifier: include_environment_feedback=true, all layers
-#   D. Verifier + solution: condition C + successful sibling in prompt
+# Layer 2 — Wrong answer (all problems):
+#   "Your answer X is incorrect. The correct answer is Y."
+#   Mirrors what a real verifier returns: actual vs expected, nothing more.
+#   No problem-specific heuristics — works for any math problem.
 # ---------------------------------------------------------------------------
 
-_FEEDBACK_NO_BOXED = (
-    "Your previous response did not include a final answer in \\boxed{} format. "
-    "Please state your answer as \\boxed{your answer}."
+_FEEDBACK_TRUNCATED = (
+    "Your response was truncated because it exceeded the maximum length."
 )
 
-# Known unit-conversion ratios that produce wrong answers when missed.
-# (factor, human-readable description)  — checked as ratio AND its inverse.
-_UNIT_RATIO_HINTS = [
-    (60,    "this may be a minutes \u2194 hours unit mismatch"),
-    (3600,  "this may be a seconds \u2194 hours unit mismatch"),
-    (1000,  "this may be a kilo-unit mismatch (e.g. g\u2194kg, m\u2194km)"),
-    (100,   "this may be a centi-unit or percentage mismatch (e.g. cm\u2194m)"),
-    (12,    "this may be an inches \u2194 feet unit mismatch"),
-    (5280,  "this may be a feet \u2194 miles unit mismatch"),
-    (2.54,  "this may be a centimetres \u2194 inches unit mismatch"),
-]
-
-# Quantity keywords searched (in reverse) near \boxed{} in the response.
-_QUANTITY_KEYWORDS = [
-    ("speed",       "speed"),
-    ("velocity",    "velocity"),
-    ("rate",        "rate"),
-    ("time",        "time"),
-    ("duration",    "duration or time"),
-    ("distance",    "distance"),
-    ("length",      "length or distance"),
-    ("height",      "height"),
-    ("width",       "width"),
-    ("depth",       "depth"),
-    ("area",        "area"),
-    ("volume",      "volume"),
-    ("pressure",    "pressure"),
-    ("force",       "force"),
-    ("mass",        "mass"),
-    ("weight",      "mass or weight"),
-    ("work",        "work or energy"),
-    ("energy",      "energy"),
-    ("cost",        "cost"),
-    ("profit",      "profit"),
-    ("revenue",     "revenue"),
-    ("probability", "probability"),
-    ("angle",       "angle"),
-    ("perimeter",   "perimeter"),
-    ("radius",      "radius"),
-    ("diameter",    "diameter"),
-]
+_FEEDBACK_NO_BOXED = (
+    "Your answer had the wrong format. "
+    "The solution must be given in the format: \\boxed{your_answer}."
+)
 
 
-def _detect_unit_ratio_hint(model_answer: str, ground_truth: str) -> str:
-    """Layer 2b: return a unit-mismatch hint if answer/gt ratio matches a known factor."""
-    try:
-        m = float(model_answer)
-        g = float(ground_truth)
-        if g == 0 or m == 0:
-            return ""
-        ratio = m / g
-        for factor, hint in _UNIT_RATIO_HINTS:
-            if abs(ratio - factor) / factor < 0.02:
-                return hint
-            inv = 1.0 / factor
-            if abs(ratio - inv) / inv < 0.02:
-                return hint
-    except (ValueError, TypeError, ZeroDivisionError):
-        pass
-    return ""
-
-
-def _detect_quantity_context(solution_str: str) -> str:
-    """Layer 2d: return the quantity the model claims to have computed from context near \\boxed{}."""
-    idx = solution_str.rfind("\\boxed")
-    if idx < 0:
-        return ""
-    context = solution_str[max(0, idx - 300):idx].lower()
-    best_pos, best_label = -1, ""
-    for kw, label in _QUANTITY_KEYWORDS:
-        pos = context.rfind(kw)
-        if pos > best_pos:
-            best_pos, best_label = pos, label
-    return best_label
-
-
-def _detect_arithmetic_inconsistency(solution_str: str, model_answer: str) -> str:
-    """Layer 2c: flag a stated numeric result in the response that conflicts with the boxed answer."""
-    try:
-        m_val = float(model_answer)
-        idx = solution_str.rfind("\\boxed")
-        tail = solution_str[max(0, idx - 600):idx] if idx > 0 else solution_str[-600:]
-        # Match "= <number>" at line/clause boundaries
-        matches = re.findall(r'=\s*([-+]?\d+(?:\.\d+)?)\s*(?:\n|$|[,;.]|\s)', tail)
-        for match in reversed(matches):
-            val = float(match)
-            if abs(val) > 1e-9 and abs(val - m_val) / max(abs(m_val), 1.0) > 0.01:
-                return (f"You stated = {match} but wrote \\boxed{{{model_answer}}}; "
-                        f"check for a transcription error between steps.")
-    except (ValueError, TypeError):
-        pass
-    return ""
-
-
-def _make_feedback(no_boxed: bool, model_answer: str = "", data_source: str = "",
-                   solution_str: str = "", ground_truth: str = "") -> str:
+def _make_feedback(
+    no_boxed: bool,
+    model_answer: str = "",
+    ground_truth: str = "",
+    was_truncated: bool = False,
+) -> str:
     """Return environment feedback for a failed rollout (SDPO environment_output f_i).
 
-    Layer 1  — generic:           "Your answer X is incorrect."
-    Layer 2a — π₁ verifier:       cube-root diagnostic when V³=2048 detected.
-    Layer 2b — unit ratio:        compact hint when answer/gt matches unit factor.
-    Layer 2c — arithmetic check:  flags stated value ≠ boxed answer.
-    Layer 2d — quantity context:  names the quantity the model solved for.
+    Layer 0 — truncated: response exceeded max length.
+    Layer 1 — no \\boxed{} (and not truncated): format nudge.
+    Layer 2 — wrong answer: verifier output stating actual vs expected.
     """
+    if was_truncated:
+        return _FEEDBACK_TRUNCATED
     if no_boxed:
         return _FEEDBACK_NO_BOXED
-
-    generic_fb = (f"Your answer {model_answer} is incorrect."
-                  if model_answer else "Your answer is incorrect.")
-
     if not model_answer:
-        return generic_fb
-
-    # Layer 2a — π₁ specific verifier
-    if data_source == "deepscaler":
-        try:
-            float(model_answer)
-            if "2048" in solution_str:
-                return (f"V\u00b3 = 2048 is correct, but \u221b2048 \u2260 {model_answer}. "
-                        f"Re-check the cube root step.")
-        except (ValueError, TypeError):
-            pass
-
-    # Layer 2b — unit ratio mismatch (uses ground_truth for ratio only, answer not revealed)
+        return "Your answer is incorrect."
     if ground_truth:
-        ratio_hint = _detect_unit_ratio_hint(model_answer, ground_truth)
-        if ratio_hint:
-            return f"Your answer {model_answer} is incorrect; {ratio_hint}."
-
-    # Layer 2c — arithmetic transcription error
-    arith_hint = _detect_arithmetic_inconsistency(solution_str, model_answer)
-    if arith_hint:
-        return arith_hint
-
-    # Layer 2d — wrong quantity context
-    quantity = _detect_quantity_context(solution_str)
-    if quantity:
-        return (f"Your answer {model_answer} is incorrect. "
-                f"You appear to have computed {quantity}; "
-                f"check which quantity the question asks for.")
-
-    return generic_fb
+        return f"Your answer {model_answer} is incorrect. The correct answer is {ground_truth}."
+    return f"Your answer {model_answer} is incorrect."
 
 
 def compute_score(
@@ -770,8 +637,9 @@ def compute_score(
     Returns a dict:
         score           : 1.0 if correct, 0.0 otherwise
         extracted_answer: the extracted \\boxed{} content, or None
-        feedback        : deterministic hint string for failed π₁ rollouts;
-                          always present (empty string for correct / val answers).
+        feedback        : verifier output for failed π₁ rollouts ("Your answer X is
+                          incorrect. The correct answer is Y."); empty string for
+                          correct answers and validation sources.
                           Must be present in every return dict so agent_loop can
                           stack reward_extra_infos into uniform numpy arrays.
                           Consumed by SDPO ray_trainer when
@@ -793,12 +661,16 @@ def compute_score(
     # feedback field would never be consumed by the trainer.
     is_training_source = (data_source == "deepscaler")
 
+    # extra_info["truncated"] is set by NaiveRewardManager when the response
+    # hit max_response_length without emitting an EOS token.
+    was_truncated = bool((extra_info or {}).get("truncated", False))
+
     model_answer = extract_answer(solution_str)
     if model_answer is None:
         return {
             "score": 0.0,
             "extracted_answer": "",
-            "feedback": _make_feedback(no_boxed=True) if is_training_source else "",
+            "feedback": _make_feedback(no_boxed=True, was_truncated=was_truncated) if is_training_source else "",
         }
 
     # Normalise ground_truth: may be str, float, int, or list
@@ -820,12 +692,9 @@ def compute_score(
         return {
             "score": 0.0,
             "extracted_answer": model_answer,
-            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
-                                       data_source=data_source, solution_str=solution_str,
-                                       ground_truth="") if is_training_source else "",
+            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer, was_truncated=was_truncated) if is_training_source else "",
         }
 
-    # Use first processed ground truth for feedback diagnostics (ratio, unit checks).
     primary_gt = processed_ground_truths[0]
 
     for gt in processed_ground_truths:
@@ -839,8 +708,7 @@ def compute_score(
         "score": 0.0,
         "extracted_answer": model_answer,
         "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
-                                   data_source=data_source, solution_str=solution_str,
-                                   ground_truth=primary_gt) if is_training_source else "",
+                                   ground_truth=primary_gt, was_truncated=was_truncated) if is_training_source else "",
     }
 
 
@@ -860,26 +728,34 @@ if __name__ == "__main__":
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
     assert r.get("feedback") == "", f"feedback must be empty string for MATH-500, got {r}"
 
-    # π₁ Layer 2: model wrote V³=2048 (correct intermediate) but wrong cube root
-    # → localized diagnostic, no correct answer revealed
-    response_with_2048 = "32 = (1/256)*4*V^3, so V^3 = 2048, V = 12 \\boxed{12}"
-    r = compute_score("deepscaler", response_with_2048, "12.8")
+    # π₁ wrong answer: verifier output includes correct answer
+    r = compute_score("deepscaler", "P = k*A*V^3, so V = 10 \\boxed{10}", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert "2048" in r["feedback"] and "cube root" in r["feedback"], \
-        f"Layer 2 feedback should mention 2048 and cube root, got: {r['feedback']}"
-    assert "12.8" not in r["feedback"], f"Layer 2 feedback must not reveal the answer: {r['feedback']}"
+    assert r["feedback"] == "Your answer 10 is incorrect. The correct answer is 12.8.", \
+        f"Feedback should state correct answer, got: {r['feedback']}"
 
-    # π₁ Layer 1 fallback: no V³=2048 detected → generic "Your answer X is incorrect."
-    response_without_2048 = "P = k*A*V^3, so V = 10 \\boxed{10}"
-    r = compute_score("deepscaler", response_without_2048, "12.8")
+    # No \boxed{} at all — π₁ training: format nudge
+    r = compute_score("deepscaler", "the answer is 12.8", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
-    assert r["feedback"] == "Your answer 10 is incorrect.", \
-        f"Layer 1 fallback should be generic, got: {r['feedback']}"
+    assert r["extracted_answer"] == ""
+    assert "boxed" in r["feedback"].lower(), f"No-boxed feedback should mention format, got: {r['feedback']}"
 
-    # No \boxed{} at all
+    # Truncated response — π₁ training: truncation message takes priority
+    r = compute_score("deepscaler", "the answer is 12.8", "12.8", extra_info={"truncated": True})
+    assert r["score"] == 0.0, f"Expected 0.0 for truncated, got {r}"
+    assert r["feedback"] == _FEEDBACK_TRUNCATED, \
+        f"Truncated feedback mismatch, got: {r['feedback']}"
+
+    # Truncated — non-training source: feedback still empty
+    r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8", extra_info={"truncated": True})
+    assert r["score"] == 0.0, f"Expected 0.0, got {r}"
+    assert r.get("feedback") == "", f"MATH-500 truncated should have empty feedback, got: {r['feedback']}"
+
+    # No \boxed{} at all — non-training: feedback empty
     r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8")
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
     assert r["extracted_answer"] == ""
+    assert r.get("feedback") == "", f"MATH-500 no-boxed should have empty feedback, got: {r['feedback']}"
 
     # SymPy equivalence: \frac{64}{5} == 12.8
     r = compute_score("lighteval/MATH", "\\boxed{\\frac{64}{5}}", "12.8")

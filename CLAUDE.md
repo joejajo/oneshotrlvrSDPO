@@ -276,7 +276,7 @@ def compute_score(
 - `extra_info["rollout_reward_scores"]` — dict of scores from rollout (may be empty)
 - `extra_info["truncated"]` — True if response hit max length without EOS
 
-Our `compute_score` ignores these extra fields (they're not needed for binary math reward).
+Our `compute_score` reads `extra_info["truncated"]` (set by `NaiveRewardManager` when the response hit `max_response_length` without EOS) and passes it to `_make_feedback()`.
 
 **Important**: The original One-Shot-RLVR `compute_score` returns a **float** (`0.` or `1.`).
 Our version returns a **dict** — this is intentional. SDPO's `NaiveRewardManager` accepts
@@ -308,13 +308,10 @@ AND `score == 0.0`. Validation (MATH-500) and correct answers never carry this k
 omitting it keeps the validation JSONL clean.
 `compute_score` feeds `feedback` to SDPO's reprompt template (used when
 `include_environment_feedback=true`; ignored silently for condition A).
-Four-layer verifier in `_make_feedback()`:
-- **Layer 0**: no `\boxed{}` → format nudge
-- **Layer 1**: generic wrong answer → `"Your answer {X} is incorrect."`
-- **Layer 2a** (π₁ only, response contains "2048"): cube-root error → `"V³ = 2048 is correct, but ∛2048 ≠ {X}. Re-check cube root."`
-- **Layer 2b** (π₁ only, unit ratio detectable): unit/ratio error hint
-- **Layer 2c** (π₁ only, arithmetic inconsistency): computation check hint
-- **Layer 2d** (π₁ only, wrong quantity): quantity context hint
+Verifier output in `_make_feedback()` — matches SDPO upstream `verl/utils/reward_score/feedback/math.py`:
+- **Layer 0** (truncated): `"Your response was truncated because it exceeded the maximum length."` — takes priority
+- **Layer 1** (no `\boxed{}`, not truncated): `"Your answer had the wrong format. The solution must be given in the format: \boxed{your_answer}."`
+- **Layer 2** (wrong answer): `"Your answer {X} is incorrect. The correct answer is {Y}."`
 - Correct → `""` (empty; teacher forward skipped for this sample)
 
 **Three training scripts — ablation conditions:**

@@ -13,28 +13,26 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
-### 2026-04-17 — Align nofeedback (condition A) script to SDPO paper scalar reward hyperparameters
+### 2026-04-17 — Add nofeedback v2 script: fix mode collapse at step 24
 
-**Files**: `scripts/train_oneshot_sdpo_nofeedback.slurm`, `CLAUDE.md`
+**Files**: `scripts/train_oneshot_sdpo_nofeedback_v2.slurm`
 
-**Problem**: The nofeedback (condition A) script had diverged significantly from the SDPO
-paper's scalar reward settings (`experiments/generalization/run_sdpo_all.sh` + `sdpo.yaml`).
-It had been customized with anti-overfit settings that were not paper-matching:
-- `alpha=0.0` (forward KL) → paper uses `0.5` (JSD)
-- `teacher_update_rate=0.01` (slow EMA) → paper uses `0.05`
-- `entropy_coeff=0.01` → paper uses `0`
-- `lr=1e-6` → paper uses `1e-5`
-- `ppo_mini_batch_size=16` → sdpo.yaml + generalization script uses `32`
-- `lr_warmup_steps=0` → generalization script uses `10`
-- `data.train_batch_size=128` → paper uses `32`
-- `rollout.temperature=0.6` → paper uses `1.0`
-- `max_response_length=2048` → changed to `3072`
-- `max_reprompt_len=2048` → changed to `4096`
-- `total_training_steps=60` → changed to `300`
+**Problem**: v1 run (condition A, `train_batch_size=32`) collapsed at step 24:
+val dropped 29.6% → 10.4% over steps 24–30 while train reward climbed 41% → 48%.
+Root cause: 32×8=256 rollouts/step on a single problem → EMA teacher rapidly locked
+onto one output mode with no regularisation to resist it.
 
-**Fix**: Updated all of the above to match the paper's scalar reward (generalization) settings.
+**Fix** (3 changes from v1):
+- `data.train_batch_size=128` — use all 128 pi1_r128 rows per step (One-Shot-RLVR
+  paper default); 1024 rollouts/step makes GRPO advantage normalisation harder to game
+- `actor_rollout_ref.actor.ppo_mini_batch_size=128` — keeps gradient-step count (8)
+  unchanged vs v1 (1024/128 = 8 updates, same as v1's 256/32 = 8)
+- `actor_rollout_ref.actor.entropy_coeff=0.001` — conservative direct anti-collapse
+  regulariser; paper uses 0 but paper has a diverse dataset
 
 ---
+
+
 
 ### 2026-04-17 — Align sec3 script to SDPO paper scalar reward hyperparameters
 
