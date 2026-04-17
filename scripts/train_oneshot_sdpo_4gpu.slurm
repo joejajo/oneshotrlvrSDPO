@@ -127,24 +127,26 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
-# ── SDPO 4-GPU stable run — fixes for oscillating collapse ───────────────────
+# ── SDPO 4-GPU stable run — target >50% MATH-500 ─────────────────────────────
 #
-# Root causes of prior collapse (train_1578488.log, steps 0-80):
-#   1. No fixed regularization anchor: teacher_update_rate=0.05 drifts fast,
-#      pulling the student into forgetting general math within ~10 steps.
-#      Fix: teacher_update_rate=0.005 (10× slower; near-frozen anchor for 200 steps).
-#   2. reprompt_truncation=left strips the original problem statement from the
-#      reprompt context, causing incoherent model outputs (confirmed in 72.jsonl).
-#      Fix: reprompt_truncation=right preserves {prompt} at the start.
+# Root cause of all prior collapse: EMA teacher drifts away from original weights,
+# destroying the regularization anchor. GRPO avoids this with use_kl_loss=True
+# against a frozen ref; SDPO has no frozen ref (teacher IS the ref).
 #
-# Additional fixes vs nofeedback script:
-#   lr=1e-6          (10× slower forgetting; matches SDPO paper experiments)
-#   lr_warmup_steps=20  (gentler ramp with 4× larger batch)
-#   temperature=0.6  (higher early success rate → more distillation signal)
-#   train_batch_size=128  (all 128 π₁ copies per step; 4× more stable gradients)
-#   gpu_memory_utilization=0.5  (more GPU memory available with 4 GPUs)
-#   total_training_steps=250  (step cost ~3× higher with batch=128; fits 16h)
-#   object_store_memory=4GiB  (scaled with larger batch/rollouts)
+# Fix — make the teacher nearly frozen via τ=0.001:
+#   After 250 steps: drift = 1 - 0.999^250 = 22% from original  (vs 71% with τ=0.05)
+#   Teacher stays close to original model → strong distillation anchor → no forgetting
+#   Teacher still slowly incorporates student's π₁ solutions as success rate grows
+#
+# reprompt_truncation=right + max_reprompt_len=1024:
+#   1024 = 4096 (Qwen2.5-Math-1.5B context limit) - 3072 (max_response_length)
+#   Reprompt always fits; model always gets full 3072-token budget for new response.
+#   Right truncation keeps {prompt} at start, cuts tail of solution if needed.
+#
+# Other changes vs nofeedback script:
+#   lr=1e-6, lr_warmup_steps=20, temperature=0.6, train_batch_size=128,
+#   gpu_memory_utilization=0.5, n_gpus_per_node=4, total_training_steps=250,
+#   object_store_memory=4GiB, output_dir=output_4gpu/
 #
 # Verification criterion (by step 15):
 #   val-core/simplerl/math500/reward/mean@1 ≥ 0.30  (no collapse)
@@ -199,9 +201,9 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
     actor_rollout_ref.actor.self_distillation.alpha=0.5 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.005 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.001 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1024 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
