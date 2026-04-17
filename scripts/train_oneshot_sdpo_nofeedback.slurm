@@ -146,7 +146,7 @@ echo "================================================================"
 #
 # Anti-overfit config (tuned to make Math500 val improve with steps):
 #   alpha=0.0 (forward KL, mean-seeking), teacher_update_rate=0.01 (slow EMA),
-#   entropy_coeff=0.01 (strong entropy bonus), max_response_length=1536
+#   entropy_coeff=0.01 (strong entropy bonus), max_response_length=2048, max_reprompt_len=2048
 #
 # Rationale: slow teacher stays close to base model longer (provides general
 # reference), forward KL forces student to cover full teacher distribution
@@ -204,7 +204,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
@@ -224,7 +224,7 @@ apptainer exec --nv \
     data.train_batch_size=128 \
     data.val_batch_size=500 \
     data.max_prompt_length=1024 \
-    data.max_response_length=1536 \
+    data.max_response_length=2048 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
     \
