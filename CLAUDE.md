@@ -163,11 +163,11 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | Key | SDPO default | Our override | Reason |
 |---|---|---|---|
 | `algorithm.adv_estimator` | `gae` | `grpo` | SDPO requires grpo (no critic) |
-| `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` (conditions A and D) / `True` (paper §3) | Unnormalized advantages preserve absolute reward scale; normalizing by std causes advantage explosion when reward variance drops near saturation (~60% accuracy) — observed as val oscillation after step 100 |
+| `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` (all conditions incl. paper §3) | sdpo.yaml default is False; SDPO generalization script does not override it. Unnormalized advantages preserve absolute reward scale. |
 | `trainer.logger` | `["console","wandb"]` | `["console","tensorboard"]` | No W&B on HPC |
 | `trainer.n_gpus_per_node` | `8` | `2` | Our A100 allocation |
-| `trainer.total_epochs` | `30` | `9999` | **Critical**: with 128-row dataset and batch_size=128, len(dataloader)=1 → epoch loop exits after 30 steps, ignoring total_training_steps. 9999 makes epoch loop infinite so total_training_steps controls termination |
-| `trainer.total_training_steps` | `null` | `120` (condition A) / `90` (condition D) | 16h ÷ ~579s/step ≈ 99 steps safe max; extended to 120 for condition A to test oscillation stabilisation hypothesis (≈13.4h) |
+| `trainer.total_epochs` | `30` | `9999` | **Critical**: with 1-batch dataset, epoch loop exits after 30 steps. 9999 makes epoch loop infinite so total_training_steps controls termination |
+| `trainer.total_training_steps` | `null` | `300` (conditions A and §3) / `90` (condition D) | 16h ÷ ~140s/step ≈ 400 steps; 300 gives comfortable headroom |
 | `trainer.resume_mode` | `disable` | `auto` (rich-feedback), `disable` (no-feedback) | Resume from global_step_20 checkpoint for rich-feedback run |
 | `trainer.val_before_train` | `True` | `True` | Keep baseline measurement |
 
@@ -180,21 +180,21 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.include_environment_feedback` | `True` | `true` | **Condition D (current)**: rich feedback — sibling solution + verifier text |
 | `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | Include solution in reprompt (condition D) |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
-| `self_distillation.max_reprompt_len` | `10240` | `2048` | Caps reprompt length; truncation_side=left prevents crash |
+| `self_distillation.max_reprompt_len` | `10240` | `4096` | Caps reprompt length; truncation_side=left prevents crash |
 | `self_distillation.reprompt_truncation` | `"error"` | `left` | **Critical**: default "error" crashes when reprompt > max_reprompt_len; "left" truncates silently |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
-| `self_distillation.distillation_topk` | `100` | `100` (condition A) / `20` (condition D) | Condition A = Section 3 default; condition D = rich_feedback experiment setting |
-| `self_distillation.alpha` | `0.5` | `0.5` (condition A) / `1.0` (condition D) | Paper Table 12: Section 3 (scalar reward) uses JSD (α=0.5); Section 4 (rich feedback) uses reverse KL (α=1.0) |
+| `self_distillation.distillation_topk` | `100` | `100` (conditions A and §3) / `20` (condition D) | Conditions A/§3 = paper scalar reward default; condition D = rich_feedback experiment setting |
+| `self_distillation.alpha` | `0.5` | `0.5` (conditions A and §3) / `1.0` (condition D) | Paper scalar reward uses JSD (α=0.5); rich feedback uses reverse KL (α=1.0) |
 | `self_distillation.teacher_regularization` | `ema` | `ema` | Standard SDPO |
-| `self_distillation.teacher_update_rate` | `0.05` | `0.05` (both conditions) | Paper/YAML default; 0.01 was tried for condition A but reverted — slower EMA did not improve early oscillation |
+| `self_distillation.teacher_update_rate` | `0.05` | `0.05` (all conditions) | Paper/YAML default |
 | `self_distillation.is_clip` | `2` | `2.0` | Same as default |
 | `self_distillation.dont_reprompt_on_self_success` | `True` | `true` | Same as default |
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
-| `entropy_coeff` | `0` | not overridden | Restored to SDPO default (0); original SDPO loss has no entropy term |
-| `ppo_mini_batch_size` | `256` | `16` | 2 GPUs; keeps peak logit memory safe |
-| `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences = prompt(1024)+reprompt(2048)+response(3072) = 6144 tokens; at 4096 budget at most 1 student seq per micro-batch → teacher logsumexp = 6144×151936×4 = 3.73 GB; fits on 2×A100-40GB with vLLM reserved |
-| `optim.lr` | `1e-6` | `1e-6` (both conditions) | SDPO generalization uses 1e-5 at batch=32. We use batch=128 (4× larger) so LR scaled down to 1e-6 to keep effective update size equivalent. lr=1e-5 caused catastrophic val drop (30.6%→16%) at step 12. |
-| `optim.lr_warmup_steps` | `-1` | `0` (both conditions) | No warmup; LR is already conservative |
+| `entropy_coeff` | `0` | not overridden | SDPO default (0); no entropy term |
+| `ppo_mini_batch_size` | `256` | `32` (conditions A and §3) | Matches sdpo.yaml + generalization script; `ppo_max_token_len_per_gpu=4096` keeps peak logit memory safe |
+| `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences = prompt(1024)+reprompt(4096)+response(3072) = 8192 tokens; at 4096 budget at most 1 student seq per micro-batch → teacher logsumexp = 8192×151936×4 = 4.97 GB; fits on 2×A100-40GB with vLLM reserved |
+| `optim.lr` | `1e-6` | `1e-5` (conditions A and §3) | Paper generalization script lr; matches sdpo.yaml |
+| `optim.lr_warmup_steps` | `-1` | `10` (conditions A and §3) | Paper generalization script warmup |
 
 ### rollout/rollout.yaml defaults → our overrides
 
@@ -322,8 +322,8 @@ Four-layer verifier in `_make_feedback()`:
 | Script | Condition | `include_env_feedback` | Teacher context | Notes |
 |---|---|---|---|---|
 | `train_oneshot_sdpo.slurm` | **D** | `true` | question + sibling solution + verifier text + original failed response | alpha=1.0, topk=20, batch=128, temp=0.6, norm_adv=False, val greedy |
-| `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=128, temp=0.6, no entropy |
-| `train_oneshot_sdpo_paper_sec3.slurm` | **Paper §3** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=32, temp=1.0, **no entropy**, lr=1e-5, norm_adv=True |
+| `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=32, temp=1.0, **no entropy**, lr=1e-5, norm_adv=False, warmup=10 |
+| `train_oneshot_sdpo_paper_sec3.slurm` | **Paper §3** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=32, temp=1.0, **no entropy**, lr=1e-5, norm_adv=False, warmup=10 |
 
 **Important — teacher re-evaluates, does not generate**:
 The teacher does NOT sample a new response. It takes the student's original (failed)
@@ -452,8 +452,8 @@ oneshotrlvrSDPO/
 │   └── eval_math500.slurm
 └── scripts/
     ├── train_oneshot_sdpo.slurm           ← condition D: rich feedback (2× A100, 90 steps)
-    ├── train_oneshot_sdpo_nofeedback.slurm← condition A: scalar-only  (2× A100, 120 steps)
-    ├── train_oneshot_sdpo_paper_sec3.slurm← paper §3: exact settings  (2× A100, 200 steps)
+    ├── train_oneshot_sdpo_nofeedback.slurm← condition A: scalar-only, paper settings (2× A100, 300 steps)
+    ├── train_oneshot_sdpo_paper_sec3.slurm← paper §3: exact settings  (2× A100, 300 steps)
     ├── run_local_test.sh                  ← smoke test (Steps 1-4)
     └── setup_hpc.sh                       ← one-time HPC env setup
 ```

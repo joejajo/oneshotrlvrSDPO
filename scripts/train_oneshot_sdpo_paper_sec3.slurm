@@ -128,26 +128,33 @@ echo "================================================================"
 #
 # Key differences vs our condition A (train_oneshot_sdpo_nofeedback.slurm):
 #
-#   rollout.temperature=1.0   (paper uses temp=1.0; condition A uses 0.6)
-#   data.train_batch_size=32  (paper uses 32; condition A uses 128)
-#   optim.lr=1e-5             (paper lr for batch=32; condition A uses 1e-6 scaled for batch=128)
-#   entropy_coeff=0           (paper has no entropy term; all conditions now use 0)
-#   norm_adv_by_std_in_grpo=True  (paper/YAML default; condition A uses False)
+#   rollout.temperature=1.0          (paper uses temp=1.0; condition A uses 0.6)
+#   data.train_batch_size=32         (paper uses 32; condition A uses 128)
+#   optim.lr=1e-5                    (paper lr for batch=32; condition A uses 1e-6 scaled for batch=128)
+#   entropy_coeff=0                  (paper has no entropy term; all conditions now use 0)
+#   norm_adv_by_std_in_grpo=False    (sdpo.yaml default; condition A also uses False)
+#   ppo_mini_batch_size=32           (sdpo.yaml + generalization script; condition A uses 16)
+#   lr_warmup_steps=10               (generalization script; condition A uses 0)
 #
-# Shared with condition A (confirmed against SDPO paper Section 3 / Table 4):
-#   alpha=0.5                 (JSD = symmetric KL; Section 3 "scalar reward" setting)
-#   teacher_update_rate=0.05  (EMA τ=0.05; paper/YAML default)
-#   distillation_topk=100     (Section 3 default; condition D uses 20)
+# Shared with condition A (confirmed against SDPO paper generalization experiments
+# at experiments/generalization/run_sdpo_all.sh + sdpo.yaml defaults):
+#   alpha=0.5                       (JSD = symmetric KL; scalar reward setting)
+#   teacher_update_rate=0.05        (EMA τ=0.05; yaml default, not overridden)
+#   distillation_topk=100           (generalization script; condition D uses 20)
 #   include_environment_feedback=false  (scalar-only; no text feedback)
-#   is_clip=2.0               (IS weight truncation)
-#   rollout.n=8               (group size G=8)
+#   is_clip=2.0                     (IS weight truncation)
+#   rollout.n=8                     (group size G=8)
+#   norm_adv_by_std_in_grpo=False   (sdpo.yaml default)
+#
+# Deliberate deviations from paper (resource constraints):
+#   val_kwargs.n=1   (paper uses 16; 500×16=8000 validation rollouts too expensive on 2 GPUs)
 #
 # SDPO loss (Section 3 scalar reward, no entropy):
 #   L = α·KL(m‖π_teacher) + (1-α)·KL(m‖π_student)    [m = mixture dist]
 #   where α=0.5 → symmetric JSD
 #   Importance sampling: ratio = exp(log π_student − log π_old), clipped at is_clip=2.0
 #   Top-k=100 tokens per position + uniform tail bucket
-#   Policy gradient advantage (GRPO): normalised by std (norm_adv_by_std_in_grpo=True)
+#   Policy gradient advantage (GRPO): NOT normalised by std (norm_adv_by_std_in_grpo=False)
 #
 # Step budget:
 #   batch=32, ~4 prompts/step (128 prompts / 32 batch), ~140s/step → 300 steps ≈ 11.7h
@@ -186,8 +193,8 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.agent.num_workers=1 \
     \
     actor_rollout_ref.actor.optim.lr=1e-5 \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=16 \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
@@ -203,7 +210,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
@@ -214,7 +221,7 @@ apptainer exec --nv \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     \
     algorithm.adv_estimator=grpo \
-    algorithm.norm_adv_by_std_in_grpo=True \
+    algorithm.norm_adv_by_std_in_grpo=False \
     algorithm.rollout_correction.rollout_is=token \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
     \

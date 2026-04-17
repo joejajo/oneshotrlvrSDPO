@@ -777,6 +777,15 @@ class RayPPOTrainer:
             device=device
         )
 
+        # Debug metrics: teacher prompt lengths and truncation diagnostics.
+        # prompt_lens = effective (non-padding) tokens in the reprompted teacher prompt per sample.
+        # If prompt_lens[i] == max_reprompt_len the sample was truncated; with truncation_side='left'
+        # this means the beginning of the prompt (original question) was silently cut off.
+        prompt_lens = teacher_prompt["attention_mask"].sum(dim=1).float().cpu()  # (batch_size,)
+        response_lens = response_mask.sum(dim=1).float().cpu()                   # (batch_size,)
+        max_reprompt_len = self_distillation_cfg.max_reprompt_len
+        teacher_prompt_truncated_fraction = (prompt_lens >= max_reprompt_len).float().mean().item()
+
         uids = set(batch.non_tensor_batch["uid"])
         num_with_feedback_available = sum(1 for f in feedback_list if f is not None)
         num_with_feedback_used = sum(1 for f in feedback_used if f)
@@ -787,6 +796,10 @@ class RayPPOTrainer:
             "self_distillation/feedback_available_fraction": num_with_feedback_available / batch_size,
             "self_distillation/feedback_used_fraction": num_with_feedback_used / batch_size,
             "self_distillation/reprompt_sample_fraction": self_distillation_mask.float().mean().item(),
+            # Teacher sequence length diagnostics (helps detect reprompt truncation issues)
+            "self_distillation/teacher_prompt_len_mean": prompt_lens.mean().item(),
+            "self_distillation/teacher_prompt_truncated_fraction": teacher_prompt_truncated_fraction,
+            "self_distillation/teacher_total_len_mean": (prompt_lens + response_lens).mean().item(),
         }
         return DataProto.from_dict(tensors={
             "teacher_input_ids": teacher_input_ids,

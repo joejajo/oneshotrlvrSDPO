@@ -13,7 +13,48 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
-### 2026-04-16 — Fix condition D oscillation: greedy val + disable adv norm
+### 2026-04-17 — Align nofeedback (condition A) script to SDPO paper scalar reward hyperparameters
+
+**Files**: `scripts/train_oneshot_sdpo_nofeedback.slurm`, `CLAUDE.md`
+
+**Problem**: The nofeedback (condition A) script had diverged significantly from the SDPO
+paper's scalar reward settings (`experiments/generalization/run_sdpo_all.sh` + `sdpo.yaml`).
+It had been customized with anti-overfit settings that were not paper-matching:
+- `alpha=0.0` (forward KL) → paper uses `0.5` (JSD)
+- `teacher_update_rate=0.01` (slow EMA) → paper uses `0.05`
+- `entropy_coeff=0.01` → paper uses `0`
+- `lr=1e-6` → paper uses `1e-5`
+- `ppo_mini_batch_size=16` → sdpo.yaml + generalization script uses `32`
+- `lr_warmup_steps=0` → generalization script uses `10`
+- `data.train_batch_size=128` → paper uses `32`
+- `rollout.temperature=0.6` → paper uses `1.0`
+- `max_response_length=2048` → changed to `3072`
+- `max_reprompt_len=2048` → changed to `4096`
+- `total_training_steps=60` → changed to `300`
+
+**Fix**: Updated all of the above to match the paper's scalar reward (generalization) settings.
+
+---
+
+### 2026-04-17 — Align sec3 script to SDPO paper scalar reward hyperparameters
+
+**Files**: `scripts/train_oneshot_sdpo_paper_sec3.slurm`, `CLAUDE.md`
+
+**Problem**: The sec3 script had three deviations from the SDPO paper's actual scalar
+reward (generalization) settings (`experiments/generalization/run_sdpo_all.sh` + `sdpo.yaml`):
+1. `norm_adv_by_std_in_grpo=True` — sdpo.yaml default is `False`; generalization script doesn't override
+2. `ppo_mini_batch_size=16` — sdpo.yaml and generalization script both use `32`
+3. `lr_warmup_steps=0` — generalization script sets `10`
+
+**Fix**:
+- `norm_adv_by_std_in_grpo`: True → **False**
+- `ppo_mini_batch_size`: 16 → **32**
+- `lr_warmup_steps`: 0 → **10**
+- Updated comments and CLAUDE.md table accordingly
+- `val_kwargs.n` intentionally kept at 1 (paper uses 16 but 500×16=8000 rollouts too expensive)
+
+---
+
 
 **Files**: `scripts/train_oneshot_sdpo.slurm`, `CLAUDE.md`
 
