@@ -139,16 +139,20 @@ echo "================================================================"
 # *successful sibling rollout* from the same group of 8 as the implicit
 # demonstration.  The teacher re-processes [question + sibling solution] and
 # assigns per-token credit to that sequence, which the student distils via
-# Jensen-Shannon divergence (alpha=0.5, per paper Table 12 Section 3).
+# forward KL (alpha=0.0, mean-seeking: student must cover full teacher distribution).
 # The scalar reward drives the GRPO advantage; the
 # distillation loss provides token-level supervision on HOW the correct answer
 # was reached — all without any text hint about what went wrong.
 #
-# Hyperparameters match SDPO paper Section 3 (scalar reward, Table 4 defaults):
-#   alpha=0.5 (JSD), teacher_update_rate=0.05, distillation_topk=100
+# Anti-overfit config (tuned to make Math500 val improve with steps):
+#   alpha=0.0 (forward KL, mean-seeking), teacher_update_rate=0.01 (slow EMA),
+#   entropy_coeff=0.01 (strong entropy bonus), max_response_length=1536
+#
+# Rationale: slow teacher stays close to base model longer (provides general
+# reference), forward KL forces student to cover full teacher distribution
+# (prevents mode collapse to pi1 style), entropy bonus prevents entropy collapse.
 #
 # This is condition A in our ablation (see train_oneshot_sdpo.slurm for B/C/D).
-# It matches the SDPO paper Section 3 math/scalar-reward regime exactly.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -184,7 +188,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
-    actor_rollout_ref.actor.entropy_coeff=0.001 \
+    actor_rollout_ref.actor.entropy_coeff=0.01 \
     actor_rollout_ref.actor.ppo_mini_batch_size=16 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
@@ -196,9 +200,9 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
-    actor_rollout_ref.actor.self_distillation.alpha=0.5 \
+    actor_rollout_ref.actor.self_distillation.alpha=0.0 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
@@ -220,7 +224,7 @@ apptainer exec --nv \
     data.train_batch_size=128 \
     data.val_batch_size=500 \
     data.max_prompt_length=1024 \
-    data.max_response_length=4096 \
+    data.max_response_length=1536 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
     \
@@ -231,7 +235,7 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=40 \
+    trainer.total_training_steps=60 \
     trainer.save_freq=2 \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
