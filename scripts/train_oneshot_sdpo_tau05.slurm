@@ -166,7 +166,7 @@ apptainer exec --nv \
     trainer.total_epochs=9999 \
     trainer.total_training_steps=250 \
     trainer.save_freq=10 \
-    trainer.test_freq=1 \
+    trainer.test_freq=10 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
     trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_tau05 \
