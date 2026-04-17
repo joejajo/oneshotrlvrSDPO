@@ -163,7 +163,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | Key | SDPO default | Our override | Reason |
 |---|---|---|---|
 | `algorithm.adv_estimator` | `gae` | `grpo` | SDPO requires grpo (no critic) |
-| `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` (conditions A and D) / `True` (paper §3) | Unnormalized advantages preserve absolute reward scale; normalizing by std causes advantage explosion when reward variance drops near saturation (~60% accuracy) — observed as val oscillation after step 100 |
+| `algorithm.norm_adv_by_std_in_grpo` | `True` | `False` (all conditions incl. paper §3) | sdpo.yaml default is False; SDPO generalization script does not override it. Unnormalized advantages preserve absolute reward scale. |
 | `trainer.logger` | `["console","wandb"]` | `["console","tensorboard"]` | No W&B on HPC |
 | `trainer.n_gpus_per_node` | `8` | `2` | Our A100 allocation |
 | `trainer.total_epochs` | `30` | `9999` | **Critical**: with 128-row dataset and batch_size=128, len(dataloader)=1 → epoch loop exits after 30 steps, ignoring total_training_steps. 9999 makes epoch loop infinite so total_training_steps controls termination |
@@ -323,7 +323,7 @@ Four-layer verifier in `_make_feedback()`:
 |---|---|---|---|---|
 | `train_oneshot_sdpo.slurm` | **D** | `true` | question + sibling solution + verifier text + original failed response | alpha=1.0, topk=20, batch=128, temp=0.6, norm_adv=False, val greedy |
 | `train_oneshot_sdpo_nofeedback.slurm` | **A** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=128, temp=0.6, no entropy |
-| `train_oneshot_sdpo_paper_sec3.slurm` | **Paper §3** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=32, temp=1.0, **no entropy**, lr=1e-5, norm_adv=True |
+| `train_oneshot_sdpo_paper_sec3.slurm` | **Paper §3** | `false` | question + sibling solution + original failed response | alpha=0.5, topk=100, batch=32, temp=1.0, **no entropy**, lr=1e-5, norm_adv=False, warmup=10 |
 
 **Important — teacher re-evaluates, does not generate**:
 The teacher does NOT sample a new response. It takes the student's original (failed)

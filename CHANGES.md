@@ -13,7 +13,25 @@ Target: beat or match the GRPO baseline (+3.8pp on MATH-500 for DeepSeek-R1-Dist
 
 ## Recent Changes
 
-### 2026-04-16 — Fix condition D oscillation: greedy val + disable adv norm
+### 2026-04-17 — Align sec3 script to SDPO paper scalar reward hyperparameters
+
+**Files**: `scripts/train_oneshot_sdpo_paper_sec3.slurm`, `CLAUDE.md`
+
+**Problem**: The sec3 script had three deviations from the SDPO paper's actual scalar
+reward (generalization) settings (`experiments/generalization/run_sdpo_all.sh` + `sdpo.yaml`):
+1. `norm_adv_by_std_in_grpo=True` — sdpo.yaml default is `False`; generalization script doesn't override
+2. `ppo_mini_batch_size=16` — sdpo.yaml and generalization script both use `32`
+3. `lr_warmup_steps=0` — generalization script sets `10`
+
+**Fix**:
+- `norm_adv_by_std_in_grpo`: True → **False**
+- `ppo_mini_batch_size`: 16 → **32**
+- `lr_warmup_steps`: 0 → **10**
+- Updated comments and CLAUDE.md table accordingly
+- `val_kwargs.n` intentionally kept at 1 (paper uses 16 but 500×16=8000 rollouts too expensive)
+
+---
+
 
 **Files**: `scripts/train_oneshot_sdpo.slurm`, `CLAUDE.md`
 
