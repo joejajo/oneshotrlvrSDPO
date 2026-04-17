@@ -184,6 +184,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
+    actor_rollout_ref.actor.entropy_coeff=0.001 \
     actor_rollout_ref.actor.ppo_mini_batch_size=16 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
@@ -230,8 +231,8 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=120 \
-    trainer.save_freq=5 \
+    trainer.total_training_steps=40 \
+    trainer.save_freq=2 \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
@@ -241,7 +242,7 @@ apptainer exec --nv \
     trainer.resume_mode=disable \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
-    trainer.max_actor_ckpt_to_keep=3 \
+    trainer.max_actor_ckpt_to_keep=5 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=2147483648 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
