@@ -567,33 +567,52 @@ def grade_answer_grader(given_answer: str, ground_truth: str) -> bool:
 # ---------------------------------------------------------------------------
 # Feedback for failed rollouts — environment-natural verifier output.
 #
+# Matches SDPO upstream verl/utils/reward_score/feedback/math.py verbatim.
 # The feedback string is SDPO's environment_output f_i.  It is placed into
 # the self-teacher prompt alongside the original question and (optionally) a
 # correct sibling rollout, then the original failed response is appended so
 # the teacher re-evaluates the old trajectory under feedback-augmented
 # context — NOT to generate a fresh answer (SDPO §3).
 #
-# Layer 0 — Format error (no \boxed{}):
-#   "Your previous response did not include a final answer in \boxed{} format."
+# Layer 0 — Truncated (response hit max_response_length without EOS):
+#   "Your response was truncated because it exceeded the maximum length."
+#   Takes priority over format check — a truncated response may not have
+#   a \boxed{} simply because generation was cut off.
 #
-# Layer 1 — Wrong answer (all problems):
+# Layer 1 — Format error (no \boxed{}, not truncated):
+#   "Your answer had the wrong format. The solution must be given in the
+#    format: \boxed{your_answer}."
+#
+# Layer 2 — Wrong answer (all problems):
 #   "Your answer X is incorrect. The correct answer is Y."
 #   Mirrors what a real verifier returns: actual vs expected, nothing more.
 #   No problem-specific heuristics — works for any math problem.
 # ---------------------------------------------------------------------------
 
+_FEEDBACK_TRUNCATED = (
+    "Your response was truncated because it exceeded the maximum length."
+)
+
 _FEEDBACK_NO_BOXED = (
-    "Your previous response did not include a final answer in \\boxed{} format. "
-    "Please state your answer as \\boxed{your answer}."
+    "Your answer had the wrong format. "
+    "The solution must be given in the format: \\boxed{your_answer}."
 )
 
 
-def _make_feedback(no_boxed: bool, model_answer: str = "", ground_truth: str = "") -> str:
+def _make_feedback(
+    no_boxed: bool,
+    model_answer: str = "",
+    ground_truth: str = "",
+    was_truncated: bool = False,
+) -> str:
     """Return environment feedback for a failed rollout (SDPO environment_output f_i).
 
-    Layer 0 — no \\boxed{}: format nudge.
-    Layer 1 — wrong answer: verifier output stating actual vs expected.
+    Layer 0 — truncated: response exceeded max length.
+    Layer 1 — no \\boxed{} (and not truncated): format nudge.
+    Layer 2 — wrong answer: verifier output stating actual vs expected.
     """
+    if was_truncated:
+        return _FEEDBACK_TRUNCATED
     if no_boxed:
         return _FEEDBACK_NO_BOXED
     if not model_answer:
@@ -642,12 +661,16 @@ def compute_score(
     # feedback field would never be consumed by the trainer.
     is_training_source = (data_source == "deepscaler")
 
+    # extra_info["truncated"] is set by NaiveRewardManager when the response
+    # hit max_response_length without emitting an EOS token.
+    was_truncated = bool((extra_info or {}).get("truncated", False))
+
     model_answer = extract_answer(solution_str)
     if model_answer is None:
         return {
             "score": 0.0,
             "extracted_answer": "",
-            "feedback": _make_feedback(no_boxed=True) if is_training_source else "",
+            "feedback": _make_feedback(no_boxed=True, was_truncated=was_truncated) if is_training_source else "",
         }
 
     # Normalise ground_truth: may be str, float, int, or list
@@ -669,7 +692,7 @@ def compute_score(
         return {
             "score": 0.0,
             "extracted_answer": model_answer,
-            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer) if is_training_source else "",
+            "feedback": _make_feedback(no_boxed=False, model_answer=model_answer, was_truncated=was_truncated) if is_training_source else "",
         }
 
     primary_gt = processed_ground_truths[0]
@@ -685,7 +708,7 @@ def compute_score(
         "score": 0.0,
         "extracted_answer": model_answer,
         "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
-                                   ground_truth=primary_gt) if is_training_source else "",
+                                   ground_truth=primary_gt, was_truncated=was_truncated) if is_training_source else "",
     }
 
 
@@ -716,6 +739,17 @@ if __name__ == "__main__":
     assert r["score"] == 0.0, f"Expected 0.0, got {r}"
     assert r["extracted_answer"] == ""
     assert "boxed" in r["feedback"].lower(), f"No-boxed feedback should mention format, got: {r['feedback']}"
+
+    # Truncated response — π₁ training: truncation message takes priority
+    r = compute_score("deepscaler", "the answer is 12.8", "12.8", extra_info={"truncated": True})
+    assert r["score"] == 0.0, f"Expected 0.0 for truncated, got {r}"
+    assert r["feedback"] == _FEEDBACK_TRUNCATED, \
+        f"Truncated feedback mismatch, got: {r['feedback']}"
+
+    # Truncated — non-training source: feedback still empty
+    r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8", extra_info={"truncated": True})
+    assert r["score"] == 0.0, f"Expected 0.0, got {r}"
+    assert r.get("feedback") == "", f"MATH-500 truncated should have empty feedback, got: {r['feedback']}"
 
     # No \boxed{} at all — non-training: feedback empty
     r = compute_score("lighteval/MATH", "the answer is 12.8", "12.8")
