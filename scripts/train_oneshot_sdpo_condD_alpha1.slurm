@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=oneshot_sdpo_condD_a0
+#SBATCH --job-name=oneshot_sdpo_condD_a1
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
@@ -61,7 +61,7 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  One-Shot-RLVR SDPO  [cond-D rich feedback, alpha=0.0, lr=1e-6]"
+echo "  One-Shot-RLVR SDPO  [cond-D rich feedback, alpha=1.0, lr=1e-6]"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -112,11 +112,15 @@ echo "================================================================"
 #     exceed 1024 tokens; 2048 accommodates π₁ solution (~500 tok) +
 #     feedback (~30 tok) + original prompt (~200 tok) comfortably.
 #
-# alpha=0.0 (forward KL) is retained:
-#   Prevents entropy collapse regardless of distillation gradient magnitude.
-#   The richer feedback signal might increase gradient scale at saturation;
-#   forward KL ensures the student must cover ALL teacher modes, preventing
-#   mode-seeking collapse even if gradient spikes occur.
+# alpha=1.0 (reverse KL) — paper-correct condition D:
+#   Reverse KL is mode-seeking: chases the teacher's most confident tokens
+#   directly. With rich feedback the teacher is MORE concentrated (it knows
+#   both the correct solution AND the specific error), making the signal
+#   sharper and more directed than alpha=0.0. This is the strongest
+#   distillation signal achievable and the best shot at val > 0.60.
+#   Collapse risk managed by lr=1e-6: previous collapses at lr=1e-5 had
+#   phase-transition update ~3e-5; at lr=1e-6 the same spike = ~3e-6
+#   (10× smaller). Kill signal: actor/entropy < 0.02 by step 10 = collapse.
 #
 # Expected behaviour:
 #   - No entropy collapse (proven with alpha=0.0 in prior run)
@@ -171,7 +175,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
-    actor_rollout_ref.actor.self_distillation.alpha=0.0 \
+    actor_rollout_ref.actor.self_distillation.alpha=1.0 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
@@ -209,7 +213,7 @@ apptainer exec --nv \
     trainer.test_freq=10 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_condD_alpha0_lr1e6 \
+    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_condD_alpha1_lr1e6 \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.resume_mode=disable \
