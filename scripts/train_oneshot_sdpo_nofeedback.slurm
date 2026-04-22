@@ -1,18 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=oneshot_sdpo
+#SBATCH --job-name=oneshot_sdpo_nofb
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_nofb/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_nofb/logs/train_%j.err
 
 set -euo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output
+OUTPUT_ROOT=${PROJECT_ROOT}/output_nofb
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -97,8 +97,8 @@ export TMPDIR=/tmp
 # NOTE: expandable_segments:True was previously set here to fix fragmentation OOM at
 # π₁ saturation (~step 11). Removed because vLLM v1's CuMemAllocator explicitly
 # forbids it: "Expandable segments are not compatible with memory pool"
-# (vllm/device_allocator/cumem.py). OOM fragmentation is now mitigated solely by
-# ppo_mini_batch_size=16 (halved again for 2-GPU run), which keeps peak logit memory ~4.87 GB/GPU.
+# (vllm/device_allocator/cumem.py). OOM fragmentation is now mitigated by
+# ppo_max_token_len_per_gpu=4096 which limits peak logit memory per micro-batch.
 
 # AF_UNIX socket paths are capped at 107 bytes on Linux.
 # Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
@@ -115,7 +115,7 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  One-Shot-RLVR + SDPO training"
+echo "  One-Shot-RLVR + SDPO training  [NO RICH FEEDBACK — condition A]"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -127,54 +127,35 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
-# ── Feedback ablation conditions ─────────────────────────────────────────────
-# Four conditions to compare (same checkpoint, prompts, rollout count, seed):
+# ── SDPO paper scalar reward — exact hyperparameters ─────────────────────────
 #
-#   A. Scalar-only baseline
-#      include_environment_feedback=false
-#      (no feedback; pure GRPO-style advantage signal)
+# This script reproduces the SDPO paper scalar reward (no rich feedback) setting
+# as specified in experiments/generalization/run_sdpo_all.sh + sdpo.yaml.
 #
-#   B. Generic feedback
-#      include_environment_feedback=true
-#      environment_feedback_only_without_solution=true
-#      feedback returns: "Your answer X is incorrect."  [Layer 1 only]
+# include_environment_feedback=false
 #
-#   C. Localized verifier, no solution
-#      include_environment_feedback=true
-#      environment_feedback_only_without_solution=true
-#      feedback returns: "V³=2048 correct, ∛2048 ≠ X" when detectable  [Layer 2]
+# The environment returns only a scalar reward (1 or 0).  There is no text
+# feedback: no "Your answer X is incorrect", no localized verifier hint.
+# SDPO reprompts failed rollouts using only a *successful sibling rollout* from
+# the same group of 8 as the implicit demonstration, without any verifier text.
 #
-#   D. Localized verifier + sample solution
-#      include_environment_feedback=true
-#      environment_feedback_only_without_solution=false
-#      Full Table 2 template: solution + localized feedback in reprompt
+# Key hyperparameters (all matching experiments/generalization/run_sdpo_all.sh):
+#   alpha=0.5             (JSD = symmetric KL; paper scalar reward setting)
+#   teacher_update_rate=0.05  (EMA τ=0.05; sdpo.yaml default)
+#   entropy_coeff=0       (no entropy term; paper default)
+#   lr=1e-5               (paper lr)
+#   lr_warmup_steps=10    (paper generalization script)
+#   ppo_mini_batch_size=32  (sdpo.yaml + generalization script)
+#   train_batch_size=32   (paper)
+#   rollout.temperature=1.0  (paper default)
+#   distillation_topk=100  (paper scalar reward setting)
+#   norm_adv_by_std_in_grpo=False  (sdpo.yaml default)
 #
-# CURRENT CONFIG: condition D (include_environment_feedback=true, with solution)
-#   See train_oneshot_sdpo_nofeedback.slurm for condition A (scalar-only).
-#
-# To run condition B: change math_reward.py _make_feedback to skip Layer 2
-#   (comment out the `if data_source == "deepscaler"` block)
+# Deliberate deviations from paper (resource constraints):
+#   val_kwargs.n=1   (paper uses 16; 500×16=8000 validation rollouts too expensive on 2 GPUs)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
-# Config base: ppo_trainer
-#   Using --config-name ppo_trainer (NOT sdpo).
-#   sdpo.yaml inherits user.yaml which requires TASK and EXPERIMENT env vars
-#   specific to the CSCS cluster. ppo_trainer.yaml is cluster-neutral.
-#   All SDPO-specific keys are set explicitly below.
-#
-# SDPO keys (absent from ppo_trainer.yaml, must be set explicitly):
-#   actor_rollout_ref.actor.policy_loss.loss_mode=sdpo
-#   algorithm.adv_estimator=grpo
-#   algorithm.norm_adv_by_std_in_grpo=True
-#   algorithm.rollout_correction.rollout_is=token
-#   algorithm.rollout_correction.rollout_is_threshold=2.0
-#   actor_rollout_ref.rollout.calculate_log_probs=True
-#   actor_rollout_ref.actor.self_distillation.*
-#
-# val_kwargs: pre-declared in rollout.yaml with correct defaults
-#   (temperature=0, n=1, do_sample=False) — no override needed.
-
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
 
 apptainer exec --nv \
@@ -191,7 +172,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
-    actor_rollout_ref.rollout.temperature=0.6 \
+    actor_rollout_ref.rollout.temperature=1.0 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
@@ -205,29 +186,31 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.agent.num_workers=1 \
     \
-    actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=16 \
+    actor_rollout_ref.actor.optim.lr=1e-5 \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
+    actor_rollout_ref.actor.entropy_coeff=0 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
-    actor_rollout_ref.actor.self_distillation.include_environment_feedback=true \
-    actor_rollout_ref.actor.self_distillation.environment_feedback_only_without_solution=false \
+    actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
-    actor_rollout_ref.actor.self_distillation.alpha=1.0 \
+    actor_rollout_ref.actor.self_distillation.alpha=0.5 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
-    actor_rollout_ref.actor.self_distillation.distillation_topk=20 \
+    actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
+    'actor_rollout_ref.actor.self_distillation.reprompt_template="{prompt}\n\nCorrect solution: {solution}\n\nCorrectly solve the original question."' \
+    'actor_rollout_ref.actor.self_distillation.solution_template="{successful_previous_attempt}"' \
     \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     \
@@ -238,7 +221,7 @@ apptainer exec --nv \
     \
     data.train_files="[${TRAIN_PARQUET}]" \
     data.val_files="[${EVAL_PARQUET}]" \
-    data.train_batch_size=128 \
+    data.train_batch_size=32 \
     data.val_batch_size=500 \
     data.max_prompt_length=1024 \
     data.max_response_length=3072 \
@@ -252,18 +235,18 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=90 \
+    trainer.total_training_steps=300 \
     trainer.save_freq=10 \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1 \
+    trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_nofb \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
-    trainer.resume_mode=auto \
+    trainer.resume_mode=disable \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
-    trainer.max_actor_ckpt_to_keep=1 \
+    trainer.max_actor_ckpt_to_keep=5 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=2147483648 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"

@@ -1,27 +1,24 @@
 #!/bin/bash
-# Pre-flight smoke test for One-Shot-RLVR + SDPO.
+# Pre-flight smoke test for One-Shot-RLVR + SDPO inside Apptainer.
 #
-# Steps 1-3 run on the LOGIN NODE (no GPU needed).
-# Step 4 (one training iteration) requires a GPU — run inside an interactive
-# GPU allocation or on a compute node:
+# Run from a GPU shell, then:
+#   apptainer exec --nv \
+#     --bind /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO \
+#     /home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif \
+#     bash
 #
-#   salloc --partition=a100 --gres=gpu:a100:4 --ntasks=1 --cpus-per-task=16 \
-#          --mem=200GB --time=00:30:00
-#
-# Usage:
-#   conda activate sdpo
-#   cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/oneshot_sdpo
+# Inside container:
+#   export PYTHONPATH=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/SDPO:/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO:${PYTHONPATH:-}
+#   cd /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 #   bash scripts/run_local_test.sh
-#
-# Override the model path if needed:
-#   MODEL_PATH=/path/to/model bash scripts/run_local_test.sh
 
 MODEL_PATH="${MODEL_PATH:-/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B}"
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ONESHOT_DIR="$(dirname "${SCRIPT_DIR}")"
+SDPO_DIR="${ONESHOT_DIR}/SDPO"
 
 echo "================================================================"
 echo "  One-Shot-RLVR + SDPO — pre-flight smoke test"
@@ -30,11 +27,20 @@ echo "================================================================"
 
 cd "${ONESHOT_DIR}"
 
-# ── Step 1: Validate committed parquet files ──────────────────────────────────
+export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PYTHONPATH:-}"
+
+unset TRANSFORMERS_CACHE
+export HF_HOME="${ONESHOT_DIR}/.hf_home"
+export XDG_CACHE_HOME="${ONESHOT_DIR}/.cache"
+mkdir -p "${HF_HOME}" "${XDG_CACHE_HOME}"
+
+unset ROCR_VISIBLE_DEVICES
+unset HIP_VISIBLE_DEVICES
+unset CUDA_VISIBLE_DEVICES
+
 echo ""
 echo ">>> Step 1: parquet file validation"
 
-# Check files exist and start with PAR1 magic bytes
 for f in data/pi1_r128.parquet data/math500.parquet; do
     if [ ! -f "${f}" ]; then
         echo "ERROR: ${f} not found" >&2
@@ -48,7 +54,7 @@ for f in data/pi1_r128.parquet data/math500.parquet; do
     echo "  ${f} : exists, PAR1 magic bytes OK"
 done
 
-python - <<'EOF'
+python - <<'PY'
 import pandas as pd
 
 train = pd.read_parquet("data/pi1_r128.parquet")
@@ -65,117 +71,142 @@ assert expected_cols.issubset(set(math500.columns)), (
     f"Missing columns in math500.parquet: {expected_cols - set(math500.columns)}"
 )
 print(f"  math500.parquet   : {len(math500)} rows  columns={math500.columns.tolist()}  OK")
-EOF
+PY
 echo ">>> Step 1 passed."
 
-# ── Step 2: Reward self-test ──────────────────────────────────────────────────
 echo ""
 echo ">>> Step 2: reward/math_reward.py self-test"
 python reward/math_reward.py
 echo ">>> Step 2 passed."
 
-# ── Step 3: Key imports ───────────────────────────────────────────────────────
 echo ""
 echo ">>> Step 3: import verification"
-python - <<'EOF'
+python - <<'PY'
+import sys
 import verl
 import vllm
 import ray
 import torch
+import numpy
+import flash_attn
 from torch.utils.tensorboard import SummaryWriter
 import sympy
-print("  verl          : ok")
-print("  vllm          : ok")
-print("  ray           : ok")
+from verl.trainer.ppo.core_algos import compute_self_distillation_loss
+
+print("  python        :", sys.executable)
+print("  verl          :", verl.__file__)
 print("  torch         :", torch.__version__)
+print("  vllm          :", vllm.__version__)
+print("  ray           :", ray.__version__)
+print("  numpy         :", numpy.__version__)
+print("  flash_attn    :", flash_attn.__version__)
 print("  tensorboard   : ok")
 print("  sympy         :", sympy.__version__)
-EOF
+print("  compute_self_distillation_loss : ok")
+PY
 echo ">>> Step 3 passed."
 
-# ── Step 4: One training iteration (requires GPU) ─────────────────────────────
 echo ""
 echo ">>> Step 4: one SDPO training iteration (end-to-end)"
 
 if ! python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
     echo "  WARNING: no GPU detected — skipping Step 4."
-    echo "  Re-run inside an interactive GPU allocation to test training."
-    echo ""
-    echo "================================================================"
-    echo "  === Steps 1-3 passed — request a GPU node for Step 4 ==="
-    echo "================================================================"
+    echo "  Re-run inside an Apptainer shell started with --nv on a GPU node."
     exit 0
 fi
 
+# Container ships its own CUDA at /usr/local/cuda — use that as fallback.
+# Do NOT call "module load cuda" here; modules are unavailable inside Apptainer.
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+export PATH="${CUDA_HOME}/bin:${PATH}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:/usr/local/lib/python3.12/dist-packages/nvidia/cuda_cupti/lib:${LD_LIBRARY_PATH:-}"
+
+export TOKENIZERS_PARALLELISM=false
+export HYDRA_FULL_ERROR=1
+export PYTHONUNBUFFERED=1
+
+# Suppress known-benign warning from verl's multimodal processor path:
+#   "Unsupported processor type: Qwen2TokenizerFast"
+# This code path is not used for text-only math training.
+export PYTHONWARNINGS="ignore:Unsupported processor type"
+
+# Use node-local /tmp for multiprocessing temp files to avoid NFS-related
+# "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
+export TMPDIR=/tmp
+
+unset ROCR_VISIBLE_DEVICES
+unset HIP_VISIBLE_DEVICES
+unset CUDA_VISIBLE_DEVICES
+
 N_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
-echo "  Detected ${N_GPUS} GPU(s) — running 1 training step with n_gpus_per_node=${N_GPUS}"
+echo "  Detected ${N_GPUS} GPU(s)"
 
 SMOKE_OUT=$(mktemp -d)
-trap 'rm -rf "${SMOKE_OUT}"' EXIT
+# Do NOT trap rm on SMOKE_OUT — keep files so rollout JSONLs can be inspected
+# after the run. Clean up manually with: rm -rf "${SMOKE_OUT}"
 
-unset VLLM_ATTENTION_BACKEND
-unset ROCR_VISIBLE_DEVICES
-export VLLM_USE_V1=1
-export PYTHONUNBUFFERED=1
+ray stop --force 2>/dev/null || true
+sleep 2
+
+export RAY_TMPDIR=/tmp/rs$$
+mkdir -p "${RAY_TMPDIR}"
+trap 'rm -rf "${RAY_TMPDIR}"' EXIT
+
+ulimit -n 65536 2>/dev/null || true
+export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 
 python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \
-    \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
-    +actor_rollout_ref.model.override_config.attn_implementation=eager \
-    \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.temperature=0.6 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=5120 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=8192 \
-    \
+    actor_rollout_ref.rollout.max_model_len=8192 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
+    actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=128 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=8 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=20000 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4000 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
     actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=1.0 \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
-    actor_rollout_ref.actor.self_distillation.alpha=0.5 \
+    actor_rollout_ref.actor.self_distillation.alpha=1.0 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
-    actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
+    actor_rollout_ref.actor.self_distillation.distillation_topk=20 \
+    actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
-    \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
-    \
     algorithm.adv_estimator=grpo \
-    algorithm.norm_adv_by_std_in_grpo=False \
+    algorithm.norm_adv_by_std_in_grpo=True \
     algorithm.rollout_correction.rollout_is=token \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
-    \
     data.train_files="[${ONESHOT_DIR}/data/pi1_r128.parquet]" \
     data.val_files="[${ONESHOT_DIR}/data/math500.parquet]" \
-    data.train_batch_size=128 \
-    data.val_batch_size=530 \
+    data.train_batch_size=8 \
     data.max_prompt_length=1024 \
-    data.max_response_length=4096 \
+    data.max_response_length=3072 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
-    \
     custom_reward_function.path="${ONESHOT_DIR}/reward/math_reward.py" \
     custom_reward_function.name=compute_score \
-    \
     'trainer.logger=["console"]' \
     trainer.n_gpus_per_node="${N_GPUS}" \
     trainer.nnodes=1 \
@@ -187,11 +218,17 @@ python -m verl.trainer.main_ppo \
     trainer.experiment_name=smoke_test \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${SMOKE_OUT}/checkpoints" \
-    trainer.default_hdfs_dir=null
+    trainer.rollout_data_dir="${SMOKE_OUT}/train_rollouts" \
+    trainer.default_hdfs_dir=null \
+    +ray_kwargs.ray_init.object_store_memory=1073741824
 
 echo ">>> Step 4 passed."
 
 echo ""
+echo "Rollout JSONLs written to: ${SMOKE_OUT}/train_rollouts/"
+ls "${SMOKE_OUT}/train_rollouts/" 2>/dev/null || echo "  (no rollout files — feedback path not triggered)"
+
+echo ""
 echo "================================================================"
-echo "  === All checks passed — safe to sbatch ==="
+echo "  === All checks passed — safe to proceed ==="
 echo "================================================================"

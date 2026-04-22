@@ -1,15 +1,17 @@
 #!/bin/bash
 # One-time HPC environment setup for One-Shot-RLVR + SDPO.
 #
-# Run this ONCE on the HPC login node after copying the repo:
+# Run this ONCE on the HPC login node after cloning the repo:
 #   bash scripts/setup_hpc.sh
 #
 # This is a SETUP STEP, not a compute-node runtime dependency.
 # Run it from the login node where pip/internet access is available.
-# The installed packages persist in the sdpo conda environment.
+# The installed packages persist in the sdpo_a100 conda environment.
 #
-# Assumes the sdpo conda env already contains:
-#   torch, vllm, flash-attn, ray, transformers, datasets, pandas, pyarrow
+# Prerequisites (see CLAUDE.md "Full install sequence" for full env creation):
+#   - conda env sdpo_vllm exists at /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
+#   - torch 2.6.0, vllm 0.8.5, flash-attn, ray[default]==2.53.0 already installed
+#   - SDPO repo cloned at /home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/SDPO
 
 set -e
 
@@ -23,27 +25,24 @@ echo "================================================================"
 
 # Activate conda env
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate sdpo
+conda activate /home/woody/iwi7/iwi7107h/conda_envs/sdpo_vllm
 
 # ── Step 1: Install SDPO (verl with SDPO modifications) ──────────────────────
-# This installs verl plus all its declared dependencies:
-#   tensorboard, pylatexenc, hydra-core, ray[default], accelerate, peft,
-#   transformers, datasets, pandas, pyarrow, and more.
-# Source: https://github.com/lasgroup/SDPO setup.py / pyproject.toml
+# Install verl as an editable package from the local SDPO clone.
+# Using pip install -e . (NOT git+https) so edits to the local clone take effect.
+# requirements.txt covers all deps: tensorboard, pylatexenc, hydra-core,
+#   ray[default]==2.53.0, numpy==2.1.0, accelerate, peft, transformers,
+#   datasets, pandas, pyarrow, sympy, word2number, math-verify, and more.
+SDPO_DIR=${PROJECT_ROOT}/SDPO
 echo ""
-echo ">>> Installing SDPO (verl with SDPO modifications) from GitHub …"
-pip install git+https://github.com/lasgroup/SDPO.git
+echo ">>> Installing SDPO deps from requirements.txt …"
+pip install -r "${SDPO_DIR}/requirements.txt"
+echo ""
+echo ">>> Installing SDPO verl fork as editable package …"
+pip install -e "${SDPO_DIR}"
 echo ">>> SDPO installed."
 
-# ── Step 2: Install sympy ─────────────────────────────────────────────────────
-# Required by grade_answer_sympy in reward/math_reward.py.
-# Not in SDPO's core install_requires, so install explicitly.
-echo ""
-echo ">>> Installing sympy …"
-pip install sympy
-echo ">>> sympy installed."
-
-# ── Step 3: Create output directory tree ─────────────────────────────────────
+# ── Step 2: Create output directory tree ─────────────────────────────────────
 echo ""
 echo ">>> Creating output directory tree under ${OUTPUT_ROOT} …"
 mkdir -p "${OUTPUT_ROOT}/checkpoints"
@@ -54,20 +53,26 @@ mkdir -p "${OUTPUT_ROOT}/eval_results"
 echo ">>> Output directories created:"
 ls -1 "${OUTPUT_ROOT}/"
 
-# ── Step 4: Verify key imports ────────────────────────────────────────────────
+# ── Step 3: Verify key imports ────────────────────────────────────────────────
 echo ""
 echo ">>> Verifying key imports …"
 python - <<'EOF'
 import verl
 import torch
+import numpy
+import ray
 from torch.utils.tensorboard import SummaryWriter
 import sympy
 import pylatexenc
-print("  verl          : ok")
-print("  torch         :", torch.__version__)
+from verl.trainer.ppo.core_algos import compute_self_distillation_loss
+print("  verl          :", verl.__file__)
+print("  torch         :", torch.__version__)   # expect 2.6.0+cu124
+print("  numpy         :", numpy.__version__)    # expect 2.1.0
+print("  ray           :", ray.__version__)      # expect 2.53.0
 print("  tensorboard   : ok")
 print("  sympy         :", sympy.__version__)
 print("  pylatexenc    : ok")
+print("  compute_self_distillation_loss : ok")
 EOF
 echo ">>> All imports verified."
 
@@ -76,7 +81,7 @@ echo "================================================================"
 echo "  Setup complete."
 echo ""
 echo "  Next steps:"
-echo "    1. cd ${PROJECT_ROOT}/oneshot_sdpo"
+echo "    1. cd ${PROJECT_ROOT}"
 echo "    2. bash scripts/run_local_test.sh"
 echo "    3. sbatch scripts/train_oneshot_sdpo.slurm"
 echo "================================================================"
