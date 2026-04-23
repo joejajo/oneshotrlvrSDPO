@@ -193,7 +193,7 @@ apptainer exec --nv \
     trainer.total_training_steps=25 \
     trainer.save_freq=5 \
     trainer.test_freq=5 \
-    trainer.max_actor_ckpt_to_keep=10 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.resume_mode=disable \
     trainer.experiment_name=oneshot_sdpo_twophase_p1_alpha0 \
     2>&1 | tee -a "${LOG}"
@@ -215,7 +215,7 @@ apptainer exec --nv \
     trainer.total_training_steps=300 \
     trainer.save_freq=10 \
     trainer.test_freq=10 \
-    trainer.max_actor_ckpt_to_keep=5 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.resume_mode=auto \
     trainer.experiment_name=oneshot_sdpo_twophase_p2_alpha05 \
     2>&1 | tee -a "${LOG}"

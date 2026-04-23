@@ -210,7 +210,7 @@ apptainer exec --nv \
     trainer.total_training_steps=25 \
     trainer.save_freq=5 \
     trainer.test_freq=5 \
-    trainer.max_actor_ckpt_to_keep=10 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.resume_mode=disable \
     trainer.default_local_dir="${P1_CKPT_DIR}" \
     trainer.experiment_name=oneshot_sdpo_twophase_v2_p1_alpha0 \
@@ -251,7 +251,7 @@ apptainer exec --nv \
     trainer.total_training_steps=200 \
     trainer.save_freq=10 \
     trainer.test_freq=10 \
-    trainer.max_actor_ckpt_to_keep=5 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.resume_mode=disable \
     trainer.default_local_dir="${P2_CKPT_DIR}" \
     trainer.experiment_name=oneshot_sdpo_twophase_v2_p2_alpha05_lr1e6 \
