@@ -78,9 +78,15 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_D
 #
 # Hardware adaptation (2× A100-40GB, paper used 8× H100):
 #   - n_gpus_per_node=2 (vs paper's 8)
-#   - gpu_memory_utilization=0.4 (vs paper's 0.5)
+#   - gpu_memory_utilization=0.35 (vs paper's 0.5; reduced from 0.4 to give
+#     headroom for teacher forward — first run OOMed trying to alloc 9 GiB
+#     for logits in torch.logsumexp during actor update)
 #   - tensor_model_parallel_size=1 (1.5B fits on one GPU)
 #   - max_model_len=8192 (vs paper's 18944; fits our 40GB VRAM)
+#   - max_reprompt_len=4608 (vs paper's 10240; paper used 8×H100-80GB;
+#     on 2×A100-40GB the teacher forward over ppo_mini_batch_size=32 sequences
+#     of up to max_model_len=8192 tokens creates a logits tensor of ~9 GiB
+#     that exceeds available GPU memory; 4608 keeps teacher seqs ≤7680 tokens)
 #   - ppo_max_token_len_per_gpu=4096 (dynamic batching)
 #   - ref.fsdp_config.param_offload=true (CPU-offload teacher to save VRAM)
 #
@@ -89,7 +95,7 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_D
 #   teacher_update_rate=0.05            (paper default — NOT our prior 0.001)
 #   distillation_topk=100               (Condition A default)
 #   success_reward_threshold=0.5        (paper default)
-#   max_reprompt_len=10240              (paper default — NOT our prior 1024)
+#   max_reprompt_len=4608               (hardware-adapted from paper's 10240)
 #   reprompt_truncation=right           (paper uses right)
 #   dont_reprompt_on_self_success=true  (paper default)
 #   include_environment_feedback=false  (Condition A = no feedback)
@@ -153,7 +159,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.temperature=0.6 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.35 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.rollout.max_model_len=8192 \
@@ -184,7 +190,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.success_reward_threshold=0.5 \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=10240 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=4608 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
     actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=true \
     actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
