@@ -107,9 +107,14 @@ class ExternalZeroMQDistributedExecutor(Executor):
         import copy as _copy
         worker_vllm_config = _copy.deepcopy(self.vllm_config)
         # Each ZMQ worker is a separate Ray actor with 1 visible GPU handling 1 TP rank.
-        # vLLM asserts local_world_size <= visible_device_count; setting it to 1 satisfies
-        # that while preserving correct per-GPU KV cache allocation.
-        worker_vllm_config.parallel_config.local_world_size = 1
+        # Older vLLM asserted local_world_size <= visible_device_count; setting it to 1
+        # satisfied that assertion. In vLLM 0.17+ (v1 architecture) local_world_size is a
+        # read-only computed property (tensor_parallel_size * pipeline_parallel_size) and
+        # the device-count assertion was removed from the v1 worker init path.
+        try:
+            worker_vllm_config.parallel_config.local_world_size = 1
+        except AttributeError:
+            pass  # vLLM 0.17+: read-only property; v1 workers do not assert on device count
         kwargs = dict(
             vllm_config=worker_vllm_config,
             local_rank=None,
