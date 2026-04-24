@@ -104,8 +104,14 @@ class ExternalZeroMQDistributedExecutor(Executor):
             socket.connect(address)
             self.sockets.append(socket)
 
+        import copy as _copy
+        worker_vllm_config = _copy.deepcopy(self.vllm_config)
+        # Each ZMQ worker is a separate Ray actor with 1 visible GPU handling 1 TP rank.
+        # vLLM asserts local_world_size <= visible_device_count; setting it to 1 satisfies
+        # that while preserving correct per-GPU KV cache allocation.
+        worker_vllm_config.parallel_config.local_world_size = 1
         kwargs = dict(
-            vllm_config=self.vllm_config,
+            vllm_config=worker_vllm_config,
             local_rank=None,
             rank=None,
             distributed_init_method="env://",
