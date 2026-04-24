@@ -88,16 +88,18 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   max_reprompt_len = max_model_len - max_response_length = 4096 - 2048 = 2048.
 #   This ensures teacher input (reprompt + response) always ≤ max_model_len.
 #
-#   ppo_max_token_len_per_gpu=1024: conservative for 7B. With dynamic batching
-#   and ppo_mini_batch_size=8 = train_batch_size, there is exactly 1 gradient
-#   update per step (no inner-loop overfitting on 1-shot data).
+#   ppo_max_token_len_per_gpu=4096: token budget per GPU for actor update.
+#   ppo_mini_batch_size=32: 1 optimizer step per rollout batch (no overfitting
+#   on stale data). With batch=8, n=8 → 64 rollouts / 32 mini-batch = 2 steps.
 #
 # Training design:
+#   rollout.n=8: matches SDPO paper; 8 rollouts per prompt for GRPO advantage.
 #   alpha=0.5 (JSD): paper Condition A default. SDPO paper shows JSD is more
 #   stable than pure forward/reverse KL for on-policy training.
 #   success_reward_threshold=1.0: binary reward, only perfect = teacher.
 #   include_environment_feedback=false: Condition A (scalar reward only).
 #   teacher_update_rate=0.05: paper default (active EMA).
+#   entropy_coeff=0: SDPO default; no entropy term (paper conditions A/§3).
 #   Condition D (rich feedback) can be enabled later once Condition A is stable.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -127,7 +129,7 @@ apptainer exec --nv \
     actor_rollout_ref.model.trust_remote_code=True \
     \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.n=4 \
+    actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.temperature=1.0 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.28 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
@@ -144,8 +146,8 @@ apptainer exec --nv \
     \
     actor_rollout_ref.actor.optim.lr=1e-5 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=20 \
-    actor_rollout_ref.actor.entropy_coeff=0.001 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=8 \
+    actor_rollout_ref.actor.entropy_coeff=0 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
@@ -189,7 +191,7 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=200 \
+    trainer.total_training_steps=100 \
     trainer.save_freq=10 \
     trainer.test_freq=10 \
     trainer.val_before_train=True \
