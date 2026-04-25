@@ -106,15 +106,24 @@ class ExternalZeroMQDistributedExecutor(Executor):
 
         import copy as _copy
         worker_vllm_config = _copy.deepcopy(self.vllm_config)
-        # Each ZMQ worker is a separate Ray actor with 1 visible GPU handling 1 TP rank.
-        # Older vLLM asserted local_world_size <= visible_device_count; setting it to 1
-        # satisfied that assertion. In vLLM 0.17+ (v1 architecture) local_world_size is a
-        # read-only computed property (tensor_parallel_size * pipeline_parallel_size) and
-        # the device-count assertion was removed from the v1 worker init path.
+        # Each ZMQ worker is a Ray actor with exactly 1 visible GPU (one TP rank).
+        # vLLM gpu_worker.py asserts local_world_size <= visible_device_count.
+        # In vLLM 0.17+ local_world_size is a read-only computed property
+        # (tensor_parallel_size * pipeline_parallel_size = TP * 1 = TP).
+        # Override it to 1 via a dynamic subclass so the assertion passes without
+        # changing tensor_parallel_size (which controls actual model sharding).
+        _parallel_config = worker_vllm_config.parallel_config
         try:
-            worker_vllm_config.parallel_config.local_world_size = 1
+            _parallel_config.local_world_size = 1
         except AttributeError:
-            pass  # vLLM 0.17+: read-only property; v1 workers do not assert on device count
+            _pc_cls = type(_parallel_config)
+            _Patched = type("_PatchedParallelConfig", (_pc_cls,), {
+                "local_world_size": property(fget=lambda self: 1)
+            })
+            try:
+                _parallel_config.__class__ = _Patched
+            except TypeError:
+                pass  # __slots__ restriction — unlikely for vLLM dataclasses
         kwargs = dict(
             vllm_config=worker_vllm_config,
             local_rank=None,
