@@ -722,8 +722,6 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             offload_fsdp_model_to_cpu(self.actor_module_fsdp)
         log_gpu_memory_usage("After offload_fsdp_model_to_cpu", logger=logger)
 
-        set_expandable_segments(False)
-
         if peft_config is not None and self.base_sync_done:
             per_tensor_param = params.items() if isinstance(params, dict) else params  # Fixed: handle dict case
         else:
@@ -735,6 +733,11 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
 
         if self.config.rollout.free_cache_engine:
             await self.rollout.resume(tags=["weights"])
+        # Switch allocator to standard cudaMalloc AFTER vLLM has already mapped its
+        # cuMem virtual ranges during wake_up().  Calling this before resume() would
+        # race with cuMem's physical-memory allocation and cause OOM in the cuMem
+        # allocator even when total memory is well within budget.
+        set_expandable_segments(False)
         log_gpu_memory_usage("After resume weights", logger=logger)
 
         if peft_config is not None and getattr(self.rollout, "sleep_level", None) == 2:

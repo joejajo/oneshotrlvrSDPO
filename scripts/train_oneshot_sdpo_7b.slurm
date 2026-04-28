@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=oneshot_sdpo_7b
 #SBATCH --partition=a100
-#SBATCH --gres=gpu:a100:2
+#SBATCH --gres=gpu:a100:4
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b/logs/train_%j.out
@@ -61,50 +61,40 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
          "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
-# ── Qwen2.5-Math-7B SDPO on 2× A100-40GB ─────────────────────────────────────
+# ── Qwen2.5-Math-7B SDPO on 4× A100-40GB ─────────────────────────────────────
 #
-# Memory budget (7B bf16, FSDP×2, optimizer_offload=True):
+# Memory budget (7B bf16, FSDP×4, optimizer_offload=True):
 #
-#   vLLM (TP=2, gpu_memory_utilization=0.28):
-#     Each GPU reserves 0.28 × 40 = 11.2 GB for vLLM.
-#     7B weights in bf16 = 14 GB; with TP=2 each GPU holds 7 GB of weights.
-#     KV cache per GPU: 11.2 - 7 = 4.2 GB.
-#     Qwen2.5-7B: 32 layers, 8 KV heads, head_dim=128, bf16.
-#     With TP=2: 4 KV heads/GPU → 64 KB/token.
-#     4.2 GB / 64 KB ≈ 65,000 token slots (more than enough for 8 seqs × 4096).
-#     tensor_model_parallel_size MUST be 2 — 7B (14 GB) > 11.2 GB on 1 GPU.
+#   vLLM (TP=2, gpu_memory_utilization=0.5):
+#     Each of the 2 TP GPUs reserves 0.5 × 40 = 20 GB for vLLM.
+#     7B weights in bf16 = 14 GB; with TP=2 each holds 7 GB weights.
+#     KV cache per GPU: 20 - 7 = 13 GB.
+#     Ample for 32 seqs × 6144 tokens.
 #
 #   FSDP actor (optimizer_offload=True):
-#     Sharded params: 14 GB / 2 = 7 GB per GPU.
-#     Adam fp32 states: 56 GB total → CPU (optimizer_offload=True).
-#     Peak during forward all-gather: 14 GB params briefly on each GPU.
-#     Available per GPU after vLLM: 40 - 11.2 = 28.8 GB.
-#     Peak actor usage: 14 GB (full params) + activations (small at batch=8)
-#                       < 28.8 GB available. ✓
+#     Sharded params across 4 GPUs: 14 GB / 4 = 3.5 GB per GPU.
+#     Adam fp32 states (56 GB) → CPU (optimizer_offload=True).
+#     Peak during forward all-gather: 14 GB params on active GPU.
+#     During rollout vLLM holds 20 GB on its 2 GPUs; FSDP params stay
+#     in their 3.5 GB shards → peak on TP GPUs: 20 + 3.5 = 23.5 GB < 40 GB ✓
 #
 #   Ref/teacher (param_offload=True):
 #     Kept on CPU, loaded shard-by-shard during teacher forward. ✓
 #
-#   max_reprompt_len = max_model_len - max_response_length = 4096 - 2048 = 2048.
-#   This ensures teacher input (reprompt + response) always ≤ max_model_len.
+#   max_model_len = 6144:
+#     prompt(1024) + reprompt(2048) + response(2048) = 5120; 6144 gives buffer.
 #
-#   ppo_max_token_len_per_gpu=4096: token budget per GPU for actor update.
-#   ppo_mini_batch_size=32: 1 optimizer step per rollout batch (no overfitting
-#   on stale data). With batch=8, n=8 → 64 rollouts / 32 mini-batch = 2 steps.
+# Sampling hyperparameters — matched to original SDPO (rollout.yaml defaults):
+#   top_p=1.0, top_k=-1: full distribution, no nucleus / top-k truncation.
+#   temperature=1.0: training rollouts (original SDPO default).
+#   val_kwargs.temperature=0.6: inline eval (greedy is too noisy at 500 problems).
 #
-# Training design:
-#   rollout.n=8: matches SDPO paper; 8 rollouts per prompt for GRPO advantage.
-#   alpha=0.5 (JSD): paper Condition A default. SDPO paper shows JSD is more
-#   stable than pure forward/reverse KL for on-policy training.
-#   success_reward_threshold=1.0: binary reward, only perfect = teacher.
-#   include_environment_feedback=false: Condition A (scalar reward only).
-#   teacher_update_rate=0.05: paper default (active EMA).
-#   entropy_coeff=0: SDPO default; no entropy term (paper conditions A/§3).
-#   Condition D (rich feedback) can be enabled later once Condition A is stable.
+# SDPO Condition A settings (scalar reward, no environment feedback):
+#   alpha=0.5 (JSD), distillation_topk=100, teacher_update_rate=0.05, lr=1e-5.
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "================================================================"
-echo "  One-Shot-RLVR SDPO  [Qwen2.5-Math-7B, alpha=0.5 JSD, 2×A100]"
+echo "  One-Shot-RLVR SDPO  [Qwen2.5-Math-7B, alpha=0.5 JSD, 4×A100]"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -131,16 +121,18 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.temperature=1.0 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.28 \
+    actor_rollout_ref.rollout.top_p=1.0 \
+    actor_rollout_ref.rollout.top_k=-1 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=4096 \
-    actor_rollout_ref.rollout.max_num_seqs=8 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=8192 \
+    actor_rollout_ref.rollout.max_model_len=6144 \
+    actor_rollout_ref.rollout.max_num_seqs=32 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
-    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
     actor_rollout_ref.rollout.val_kwargs.top_p=1.0 \
-    actor_rollout_ref.rollout.val_kwargs.do_sample=False \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.agent.num_workers=1 \
     \
@@ -149,7 +141,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=16384 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     \
@@ -163,7 +155,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
-    actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
+    actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
@@ -177,7 +169,7 @@ apptainer exec --nv \
     \
     data.train_files="[${TRAIN_PARQUET}]" \
     data.val_files="[${EVAL_PARQUET}]" \
-    data.train_batch_size=8 \
+    data.train_batch_size=32 \
     data.val_batch_size=500 \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
@@ -188,7 +180,7 @@ apptainer exec --nv \
     custom_reward_function.name=compute_score \
     \
     'trainer.logger=["console","tensorboard"]' \
-    trainer.n_gpus_per_node=2 \
+    trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
     trainer.total_training_steps=100 \
