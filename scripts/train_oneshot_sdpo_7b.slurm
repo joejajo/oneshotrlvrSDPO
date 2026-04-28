@@ -82,7 +82,10 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     Kept on CPU, loaded shard-by-shard during teacher forward. ✓
 #
 #   max_model_len = 6144:
-#     prompt(1024) + reprompt(2048) + response(2048) = 5120; 6144 gives buffer.
+#   max_reprompt_len=2400: π₁ prompt ≈ 150 tok + template 8 tok + solution ≤ 2048
+#   = 2206 tok worst-case. 2400 gives headroom so truncation never fires.
+#   reprompt_truncation=right: original SDPO default; irrelevant since 2400>2206.
+#   max_model_len=6144: teacher input = reprompt(2400)+response(2048)=4448 ✓
 #
 # Sampling hyperparameters — matched to original SDPO (rollout.yaml defaults):
 #   top_p=1.0, top_k=-1: full distribution, no nucleus / top-k truncation.
@@ -154,8 +157,8 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
-    actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2400 \
+    actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
