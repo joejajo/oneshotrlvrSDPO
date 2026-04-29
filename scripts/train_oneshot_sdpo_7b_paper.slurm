@@ -116,8 +116,14 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   max_reprompt_len=2400: π₁ reprompt worst-case = 2206 tok < 2400 → no truncation ✓
 #   reprompt_truncation=right: SDPO default; irrelevant since 2400>2206.
 #
+#   use_torch_compile=False (actor + ref):
+#     Default in actor.yaml is use_torch_compile=True. Torch.compile/inductor buffers
+#     consume 5-8 GB extra GPU memory during actor update. With compile enabled,
+#     35.88 GB was in use leaving only 3.57 GB — insufficient for logsumexp (needs 5 GB).
+#     Disabling compile frees those buffers; actor update runs in eager mode.
+#
 #   ppo_max_token_len_per_gpu=8192: teacher logit matrix = 8192×152064×2 ≈ 2.5 GB;
-#   logsumexp peak ≈ 5 GB. Total with fixed costs ~31.5 GB < 40 GB ✓ (8.5 GB headroom).
+#   logsumexp peak ≈ 5 GB. Without compile overhead (~26.5 GB base), headroom ≈ 8.5 GB ✓
 #   ppo_mini_batch_size=1 → single sequences; 8192 always covers one sequence.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -146,7 +152,7 @@ echo "  Actor  [original SDPO run_sdpo.sh params]"
 echo "    lr=1e-6  warmup_steps=0  entropy_coeff=0"
 echo "    ppo_mini_batch_size=1  ppo_max_token_len_per_gpu=8192"
 echo "    use_dynamic_bsz=True"
-echo "    param_offload=False  optimizer_offload=True"
+echo "    param_offload=False  optimizer_offload=True  use_torch_compile=False"
 echo "----------------------------------------------------------------"
 echo "  SDPO"
 echo "    loss_mode=sdpo  alpha=1.0 (reverse KL)"
@@ -211,6 +217,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=8192 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
     actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
@@ -228,6 +235,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
     \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    actor_rollout_ref.ref.fsdp_config.use_torch_compile=False \
     \
     algorithm.adv_estimator=grpo \
     algorithm.norm_adv_by_std_in_grpo=False \
