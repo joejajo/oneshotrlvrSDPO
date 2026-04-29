@@ -89,9 +89,10 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   max_reprompt_len=2400: π₁ reprompt worst-case = 2206 tok < 2400 → no truncation ✓
 #   reprompt_truncation=right: original SDPO default; irrelevant since 2400>2206.
 #
-#   ppo_max_token_len_per_gpu=4096: limits teacher logit matrix to
-#   4096 × 152064 × 2 bytes ≈ 1.25 GB; logsumexp peak ≈ 2.5 GB total. Fits. ✓
-#   (16384 caused OOM: 16384×152064×2 ≈ 5 GB + logsumexp ≈ 10 GB > budget)
+#   ppo_max_token_len_per_gpu=8192: teacher logit matrix = 8192×152064×2 ≈ 2.5 GB;
+#   logsumexp peak ≈ 5 GB. Total with fixed costs ~31.5 GB < 40 GB ✓ (8.5 GB headroom).
+#   SLEEP_LEVEL=2 frees vLLM during training so full 40 GB is available.
+#   (16384 caused OOM; 4096 was safe but created ~48 micro-batches; 8192 gives ~23)
 #
 # Sampling hyperparameters — matched to original SDPO (rollout.yaml defaults):
 #   top_p=1.0, top_k=-1: full distribution, no nucleus / top-k truncation.
@@ -149,7 +150,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=8192 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     \
