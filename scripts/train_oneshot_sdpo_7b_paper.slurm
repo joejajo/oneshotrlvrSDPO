@@ -94,10 +94,17 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   vLLM TP=2, gpu_memory_utilization=0.5 → 20 GB per TP GPU.
 #   7B weights / TP=2 = 7 GB per GPU. KV cache = 13 GB per TP GPU.
 #   FSDP shard: 14 GB / 4 = 3.5 GB per GPU on CPU (optimizer) + GPU (params).
-#   max_model_len=6144: teacher input = reprompt(≤3500) + response(2048) = 5548 ✓
-#   max_reprompt_len=3500: covers prompt(1024)+solution(≤2048)+template(~50)=3122.
-#   reprompt_truncation=right: original SDPO default (actor.yaml); their 10240
-#   budget means it never fires — we use 3500 which also never fires at r=2048.
+#
+#   max_model_len=4096: Qwen2.5-Math-7B hard limit (max_position_embeddings=4096).
+#   vLLM silently caps to 4096 regardless of what config says.
+#
+#   max_reprompt_len=1900: teacher input = reprompt(≤1900) + response(≤2048) = ≤3948 ≤ 4096 ✓
+#   π₁ reprompt worst-case = 2206 tok; truncation fires, removing ~306 tok from end.
+#   reprompt_truncation=right: original SDPO default.
+#
+#   ppo_max_token_len_per_gpu=4096: teacher logit matrix ≤ 4096×152064×2 ≈ 1.25 GB;
+#   logsumexp peak ≈ 2.5 GB total. Fits. ✓
+#   (ppo_mini_batch_size=1 means single sequences anyway; 4096 is safe upper bound)
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "================================================================"
@@ -134,7 +141,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=6144 \
+    actor_rollout_ref.rollout.max_model_len=4096 \
     actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=4 \
@@ -148,7 +155,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=1 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=16384 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     \
@@ -161,7 +168,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=3500 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1900 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
     actor_rollout_ref.actor.self_distillation.distillation_topk=20 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \

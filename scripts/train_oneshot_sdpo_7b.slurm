@@ -69,7 +69,7 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     Each of the 2 TP GPUs reserves 0.5 × 40 = 20 GB for vLLM.
 #     7B weights in bf16 = 14 GB; with TP=2 each holds 7 GB weights.
 #     KV cache per GPU: 20 - 7 = 13 GB.
-#     Ample for 32 seqs × 6144 tokens.
+#     Ample for 32 seqs × 4096 tokens.
 #
 #   FSDP actor (optimizer_offload=True):
 #     Sharded params across 4 GPUs: 14 GB / 4 = 3.5 GB per GPU.
@@ -81,11 +81,17 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   Ref/teacher (param_offload=True):
 #     Kept on CPU, loaded shard-by-shard during teacher forward. ✓
 #
-#   max_model_len = 6144:
-#   max_reprompt_len=2400: π₁ prompt ≈ 150 tok + template 8 tok + solution ≤ 2048
-#   = 2206 tok worst-case. 2400 gives headroom so truncation never fires.
-#   reprompt_truncation=right: original SDPO default; irrelevant since 2400>2206.
-#   max_model_len=6144: teacher input = reprompt(2400)+response(2048)=4448 ✓
+#   max_model_len=4096: Qwen2.5-Math-7B hard limit (max_position_embeddings=4096).
+#   vLLM silently caps to 4096 regardless of what config says.
+#
+#   max_reprompt_len=1900: teacher input = reprompt(≤1900) + response(≤2048) = ≤3948 ≤ 4096 ✓
+#   π₁ reprompt worst-case = prompt(150) + template(8) + solution(2048) = 2206 tok.
+#   Truncation fires (2206→1900), removing ~306 tokens from end of demonstration.
+#   reprompt_truncation=right: original SDPO default.
+#
+#   ppo_max_token_len_per_gpu=4096: limits teacher logit matrix to
+#   4096 × 152064 × 2 bytes ≈ 1.25 GB; logsumexp peak ≈ 2.5 GB total. Fits. ✓
+#   (16384 caused OOM: 16384×152064×2 ≈ 5 GB + logsumexp ≈ 10 GB > budget)
 #
 # Sampling hyperparameters — matched to original SDPO (rollout.yaml defaults):
 #   top_p=1.0, top_k=-1: full distribution, no nucleus / top-k truncation.
@@ -129,7 +135,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=6144 \
+    actor_rollout_ref.rollout.max_model_len=4096 \
     actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
@@ -143,7 +149,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=16384 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     \
@@ -156,7 +162,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2400 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1900 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
