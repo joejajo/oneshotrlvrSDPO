@@ -1,21 +1,21 @@
 #!/bin/bash
-#SBATCH --job-name=oneshot_sdpo_7b_paper
+#SBATCH --job-name=oneshot_sdpo_7b_paper_rope
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:4
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_paper/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_paper/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_paper_rope/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_paper_rope/logs/train_%j.err
 
 set -euo pipefail
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_sdpo_7b_paper
+OUTPUT_ROOT=${PROJECT_ROOT}/output_sdpo_7b_paper_rope
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
-MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-7B
+MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-7B-RoPE-300k
 
 TRAIN_PARQUET=${ONESHOT_DIR}/data/pi1_r128.parquet
 EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
@@ -95,12 +95,13 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   7B weights / TP=2 = 7 GB per GPU. KV cache = 13 GB per TP GPU.
 #   FSDP shard: 14 GB / 4 = 3.5 GB per GPU on CPU (optimizer) + GPU (params).
 #
-#   max_model_len=4096: Qwen2.5-Math-7B hard limit (max_position_embeddings=4096).
-#   vLLM silently caps to 4096 regardless of what config says.
+#   Model: open-r1/Qwen2.5-Math-7B-RoPE-300k
+#     rope_theta=300000, max_position_embeddings=32768 (extended from base 4096).
+#     Same weights as Qwen2.5-Math-7B; only RoPE config changed.
 #
-#   max_reprompt_len=1900: teacher input = reprompt(≤1900) + response(≤2048) = ≤3948 ≤ 4096 ✓
-#   π₁ reprompt worst-case = 2206 tok; truncation fires, removing ~306 tok from end.
-#   reprompt_truncation=right: original SDPO default.
+#   max_model_len=6144: reprompt(2400)+response(2048)=4448 ≤ 6144 ✓
+#   max_reprompt_len=2400: π₁ reprompt worst-case = 2206 tok < 2400 → no truncation ✓
+#   reprompt_truncation=right: original SDPO default; irrelevant since 2400>2206.
 #
 #   ppo_max_token_len_per_gpu=4096: teacher logit matrix ≤ 4096×152064×2 ≈ 1.25 GB;
 #   logsumexp peak ≈ 2.5 GB total. Fits. ✓
@@ -141,7 +142,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=4096 \
+    actor_rollout_ref.rollout.max_model_len=6144 \
     actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=4 \
@@ -168,7 +169,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1900 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2400 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
     actor_rollout_ref.actor.self_distillation.distillation_topk=20 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
@@ -202,7 +203,7 @@ apptainer exec --nv \
     trainer.test_freq=10 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=oneshot_sdpo_qwen25math_7b_paper \
+    trainer.experiment_name=oneshot_sdpo_qwen25math_7b_rope300k_paper \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.resume_mode=disable \
