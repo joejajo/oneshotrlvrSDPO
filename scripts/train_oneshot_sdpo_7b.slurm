@@ -86,13 +86,25 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     rope_theta=300000, max_position_embeddings=32768 (extended from base 4096).
 #     Same weights as Qwen2.5-Math-7B; only RoPE config changed.
 #
-#   max_model_len=6144: reprompt(2400)+response(2048)=4448 ≤ 6144 ✓
+#   max_model_len config note:
+#     vllm_async_server.py:225 unconditionally overwrites max_model_len with
+#     get_max_position_embeddings(hf_config) = 32768 for RoPE-300k.
+#     Our max_model_len=6144 setting is IGNORED at runtime; vLLM uses 32768.
+#     Safe: our sequences never exceed reprompt(2400)+response(2048)=4448 tok.
+#     max_num_batched_tokens=32768 aligns with actual vLLM max_model_len=32768. ✓
+#
+#   VLLM_SLEEP_LEVEL note:
+#     verl/third_party/vllm/__init__.py auto-detects level=2 for vllm>=0.8.5.
+#     vLLM 0.17.0 > 0.8.5 → VLLM_SLEEP_LEVEL=2 in Python without any env var.
+#     Our export VLLM_SLEEP_LEVEL=2 sets an env var nothing reads; harmless.
+#     enable_sleep_mode=True (default in RolloutConfig) → vLLM frees weights
+#     AND KV cache during training, giving full 40 GB for actor update. ✓
+#
 #   max_reprompt_len=2400: π₁ reprompt worst-case = 2206 tok < 2400 → no truncation ✓
-#   reprompt_truncation=right: original SDPO default; irrelevant since 2400>2206.
+#   reprompt_truncation=right: SDPO default; irrelevant since 2400>2206.
 #
 #   ppo_max_token_len_per_gpu=8192: teacher logit matrix = 8192×152064×2 ≈ 2.5 GB;
 #   logsumexp peak ≈ 5 GB. Total with fixed costs ~31.5 GB < 40 GB ✓ (8.5 GB headroom).
-#   SLEEP_LEVEL=2 frees vLLM during training so full 40 GB is available.
 #   (16384 caused OOM; 4096 was safe but created ~48 micro-batches; 8192 gives ~23)
 #
 # Sampling hyperparameters — matched to original SDPO (rollout.yaml defaults):
@@ -123,7 +135,7 @@ echo "  Rollout"
 echo "    n=8  temperature=1.0  top_p=1.0  top_k=-1"
 echo "    TP=2  gpu_mem_util=0.5  max_model_len=6144"
 echo "    max_num_seqs=32  max_num_batched_tokens=32768"
-echo "    val: n=1  temperature=0.6  top_p=1.0"
+echo "    val: n=1  temperature=0 (greedy)  top_p=1.0"
 echo "----------------------------------------------------------------"
 echo "  Actor"
 echo "    lr=1e-5  warmup_steps=20  entropy_coeff=0"
@@ -181,7 +193,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
-    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
     actor_rollout_ref.rollout.val_kwargs.top_p=1.0 \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.agent.num_workers=1 \
