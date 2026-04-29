@@ -48,6 +48,7 @@ ${_NV}/cublas/lib/libcublasLt.so.12"
 unset VLLM_ATTENTION_BACKEND
 unset ROCR_VISIBLE_DEVICES
 export VLLM_DISABLE_COMPILE_CACHE=1
+export VLLM_SLEEP_LEVEL=2
 export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1
 export APPTAINERENV_UV_THREADPOOL_SIZE=4
@@ -110,15 +111,54 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "================================================================"
-echo "  One-Shot-RLVR SDPO  [Qwen2.5-Math-7B, original SDPO params]"
-echo "  Condition    : scalar reward (no rich feedback)"
-echo "  Job ID       : ${SLURM_JOB_ID}"
-echo "  Model        : ${MODEL_PATH}"
-echo "  Train data   : ${TRAIN_PARQUET}"
-echo "  Eval data    : ${EVAL_PARQUET}"
-echo "  Checkpoints  : ${CKPT_DIR}"
-echo "  TensorBoard  : ${TENSORBOARD_DIR}"
-echo "  Container    : ${SIF}"
+echo "  One-Shot-RLVR SDPO — Paper §3 (original SDPO params, no feedback)"
+echo "  Model : Qwen2.5-Math-7B-RoPE-300k   Hardware : 4× A100-40GB"
+echo "================================================================"
+echo "  SLURM job     : ${SLURM_JOB_ID}  name=${SLURM_JOB_NAME}"
+echo "  Node          : $(hostname)   started: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "----------------------------------------------------------------"
+echo "  Paths"
+echo "    model       : ${MODEL_PATH}"
+echo "    train       : ${TRAIN_PARQUET}"
+echo "    eval        : ${EVAL_PARQUET}"
+echo "    checkpoints : ${CKPT_DIR}"
+echo "    tensorboard : ${TENSORBOARD_DIR}"
+echo "    log         : ${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
+echo "----------------------------------------------------------------"
+echo "  Rollout"
+echo "    n=8  temperature=1.0  top_p=1.0  top_k=-1"
+echo "    TP=2  gpu_mem_util=0.5  max_model_len=6144"
+echo "    max_num_seqs=32  max_num_batched_tokens=32768"
+echo "    val: n=1  temperature=0.6  top_p=1.0"
+echo "----------------------------------------------------------------"
+echo "  Actor  [original SDPO run_sdpo.sh params]"
+echo "    lr=1e-6  warmup_steps=0  entropy_coeff=0"
+echo "    ppo_mini_batch_size=1  ppo_max_token_len_per_gpu=8192"
+echo "    use_dynamic_bsz=True"
+echo "    param_offload=False  optimizer_offload=True"
+echo "----------------------------------------------------------------"
+echo "  SDPO"
+echo "    loss_mode=sdpo  alpha=1.0 (reverse KL)"
+echo "    teacher_regularization=ema  teacher_update_rate=0.01"
+echo "    distillation_topk=20  full_logit_distillation=True"
+echo "    is_clip=2.0  distillation_add_tail=True"
+echo "    max_reprompt_len=2400  reprompt_truncation=right"
+echo "    include_environment_feedback=False"
+echo "    success_reward_threshold=1.0"
+echo "    dont_reprompt_on_self_success=True"
+echo "----------------------------------------------------------------"
+echo "  Algorithm"
+echo "    adv_estimator=grpo  norm_adv_by_std=False"
+echo "    rollout_is=token  rollout_is_threshold=2.0"
+echo "----------------------------------------------------------------"
+echo "  Data"
+echo "    train_batch_size=32  max_prompt_len=1024  max_resp_len=2048"
+echo "    val_batch_size=500"
+echo "----------------------------------------------------------------"
+echo "  Training"
+echo "    total_steps=50  save_freq=5  test_freq=5"
+echo "    val_before_train=True  log_val_generations=16"
+echo "    ref param_offload=True"
 echo "================================================================"
 
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
@@ -145,8 +185,8 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.rollout.max_model_len=6144 \
     actor_rollout_ref.rollout.max_num_seqs=32 \
-    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
-    actor_rollout_ref.rollout.val_kwargs.n=4 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
     actor_rollout_ref.rollout.val_kwargs.top_p=1.0 \
     actor_rollout_ref.rollout.enforce_eager=False \
@@ -199,11 +239,11 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=100 \
-    trainer.save_freq=10 \
-    trainer.test_freq=10 \
+    trainer.total_training_steps=50 \
+    trainer.save_freq=5 \
+    trainer.test_freq=5 \
     trainer.val_before_train=True \
-    trainer.log_val_generations=0 \
+    trainer.log_val_generations=16 \
     trainer.experiment_name=oneshot_sdpo_qwen25math_7b_rope300k_paper \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
