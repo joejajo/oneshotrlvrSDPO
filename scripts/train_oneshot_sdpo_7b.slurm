@@ -215,6 +215,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \
+    actor_rollout_ref.actor.use_torch_compile=False \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
     actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
@@ -233,6 +234,7 @@ apptainer exec --nv \
     \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.ref.fsdp_config.use_torch_compile=False \
+    actor_rollout_ref.ref.use_torch_compile=False \
     \
     algorithm.adv_estimator=grpo \
     algorithm.norm_adv_by_std_in_grpo=False \
