@@ -58,6 +58,7 @@ export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
 
 ulimit -n 65536 2>/dev/null || true
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
          "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
@@ -122,9 +123,9 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     35.88 GB was in use leaving only 3.57 GB — insufficient for logsumexp (needs 5 GB).
 #     Disabling compile frees those buffers; actor update runs in eager mode.
 #
-#   ppo_max_token_len_per_gpu=8192: teacher logit matrix = 8192×152064×2 ≈ 2.5 GB;
-#   logsumexp peak ≈ 5 GB. Without compile overhead (~26.5 GB base), headroom ≈ 8.5 GB ✓
-#   ppo_mini_batch_size=1 → single sequences; 8192 always covers one sequence.
+#   ppo_max_token_len_per_gpu=4096: teacher logit matrix = 4096×152064×2 ≈ 1.25 GB;
+#   logsumexp peak ≈ 2.5 GB. With param_offload=True, GPU headroom ≥ 5 GB ✓
+#   ppo_mini_batch_size=1 → single sequences; 4096 always covers one sequence.
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "================================================================"
@@ -150,9 +151,9 @@ echo "    val: n=1  temperature=0 (greedy)  top_p=1.0"
 echo "----------------------------------------------------------------"
 echo "  Actor  [original SDPO run_sdpo.sh params]"
 echo "    lr=1e-6  warmup_steps=0  entropy_coeff=0"
-echo "    ppo_mini_batch_size=1  ppo_max_token_len_per_gpu=8192"
+echo "    ppo_mini_batch_size=1  ppo_max_token_len_per_gpu=4096"
 echo "    use_dynamic_bsz=True"
-echo "    param_offload=False  optimizer_offload=True  use_torch_compile=False"
+echo "    param_offload=True  optimizer_offload=True  use_torch_compile=False"
 echo "----------------------------------------------------------------"
 echo "  SDPO"
 echo "    loss_mode=sdpo  alpha=1.0 (reverse KL)"
@@ -216,7 +217,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.ppo_mini_batch_size=1 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
-    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \
     actor_rollout_ref.actor.use_torch_compile=False \

@@ -58,6 +58,7 @@ export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
 
 ulimit -n 65536 2>/dev/null || true
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
          "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
@@ -72,12 +73,12 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     KV cache per GPU: 20 - 7 = 13 GB.
 #     Ample for 32 seqs × 4096 tokens.
 #
-#   FSDP actor (optimizer_offload=True):
-#     Sharded params across 4 GPUs: 14 GB / 4 = 3.5 GB per GPU.
+#   FSDP actor (param_offload=True, optimizer_offload=True):
+#     Sharded params across 4 GPUs live on CPU; no persistent GPU usage.
 #     Adam fp32 states (56 GB) → CPU (optimizer_offload=True).
-#     Peak during forward all-gather: 14 GB params on active GPU.
-#     During rollout vLLM holds 20 GB on its 2 GPUs; FSDP params stay
-#     in their 3.5 GB shards → peak on TP GPUs: 20 + 3.5 = 23.5 GB < 40 GB ✓
+#     Peak during forward all-gather: one layer's params loaded transiently.
+#     Backward gradients accumulate in GPU but freed before optimizer step.
+#     Optimizer step (Adam) runs on CPU → _foreach_sqrt on CPU tensors ✓
 #
 #   Ref/teacher (param_offload=True):
 #     Kept on CPU, loaded shard-by-shard during teacher forward. ✓
@@ -111,9 +112,9 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     Disabling compile frees those buffers; actor update runs in eager mode (~1.5× slower
 #     per-step but no OOM). Ref also needs False since it shares FSDP state.
 #
-#   ppo_max_token_len_per_gpu=8192: teacher logit matrix = 8192×152064×2 ≈ 2.5 GB;
-#   logsumexp peak ≈ 5 GB. Without compile overhead (~26.5 GB base), headroom ≈ 8.5 GB ✓
-#   (16384 caused OOM; 4096 was safe but created ~48 micro-batches; 8192 gives ~23)
+#   ppo_max_token_len_per_gpu=4096: teacher logit matrix = 4096×152064×2 ≈ 1.25 GB;
+#   logsumexp peak ≈ 2.5 GB. With param_offload=True, GPU headroom ≥ 5 GB ✓
+#   (16384 OOM at logsumexp; 8192 OOM at backward/optimizer; 4096 + param_offload=True used)
 #
 # Sampling hyperparameters — matched to original SDPO (rollout.yaml defaults):
 #   top_p=1.0, top_k=-1: full distribution, no nucleus / top-k truncation.
@@ -147,9 +148,9 @@ echo "    val: n=1  temperature=0 (greedy)  top_p=1.0"
 echo "----------------------------------------------------------------"
 echo "  Actor"
 echo "    lr=1e-5  warmup_steps=20  entropy_coeff=0"
-echo "    ppo_mini_batch_size=32  ppo_max_token_len_per_gpu=8192"
+echo "    ppo_mini_batch_size=32  ppo_max_token_len_per_gpu=4096"
 echo "    use_dynamic_bsz=True"
-echo "    param_offload=False  optimizer_offload=True  use_torch_compile=False"
+echo "    param_offload=True  optimizer_offload=True  use_torch_compile=False"
 echo "----------------------------------------------------------------"
 echo "  SDPO"
 echo "    loss_mode=sdpo  alpha=0.5 (JSD)"
@@ -213,7 +214,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
-    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \
     actor_rollout_ref.actor.use_torch_compile=False \
