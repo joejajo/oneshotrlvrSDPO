@@ -116,13 +116,13 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     per-step but no OOM). Ref also needs False since it shares FSDP state.
 #
 #   ppo_max_token_len_per_gpu=4096: teacher logit matrix = 4096×152064×2 ≈ 1.25 GB;
-#   logsumexp peak ≈ 2.5 GB. With param_offload=True, GPU headroom ≥ 5 GB ✓
-#   (16384 OOM at logsumexp; 8192 OOM at backward/optimizer; 4096 + param_offload=True used)
+#   logsumexp peak ≈ 2.5 GB. With FSDP2 CPUOffloadPolicy, optimizer runs on CPU → no GPU OOM ✓
+#   (OOM progression: 16384 logsumexp → 8192 backward → 4096+FSDP1 optimizer → FSDP2 fixed)
 #
-# Sampling hyperparameters — matched to original SDPO (rollout.yaml defaults):
+# Sampling hyperparameters:
 #   top_p=1.0, top_k=-1: full distribution, no nucleus / top-k truncation.
 #   temperature=1.0: training rollouts (original SDPO default).
-#   val_kwargs.temperature=0.6: inline eval (greedy is too noisy at 500 problems).
+#   val_kwargs.temperature=0: greedy (eliminates ±2-3pp sampling noise at 500 problems).
 #
 # SDPO Condition A settings (scalar reward, no environment feedback):
 #   alpha=0.5 (JSD), distillation_topk=100, teacher_update_rate=0.05, lr=1e-5.
