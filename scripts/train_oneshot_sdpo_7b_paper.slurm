@@ -190,14 +190,16 @@ echo "================================================================"
 
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
 
-# Ensure bitsandbytes is available (8-bit Adam for FSDP1 optimizer memory reduction)
-mkdir -p "${PKGS_DIR}"
+# Verify bitsandbytes is available (compute nodes have no internet → cannot
+# pip install here). Run scripts/setup_bitsandbytes.sh on the LOGIN node first.
+echo "Verifying bitsandbytes availability ..."
 apptainer exec --nv \
     --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
     "${SIF}" \
     bash -c "PYTHONPATH='${ONESHOT_DIR}:${SDPO_DIR}:${PKGS_DIR}' \
-             python -c 'import bitsandbytes; print(\"bitsandbytes\", bitsandbytes.__version__)' 2>/dev/null \
-             || pip install --quiet --target='${PKGS_DIR}' bitsandbytes"
+             python -c 'import bitsandbytes; print(\"bitsandbytes:\", bitsandbytes.__version__); \
+                       from bitsandbytes.optim import AdamW8bit; print(\"AdamW8bit:    importable\")'" \
+    || { echo "ERROR: bitsandbytes not available. Run scripts/setup_bitsandbytes.sh on the LOGIN node, then resubmit." ; exit 1; }
 
 apptainer exec --nv \
     --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
