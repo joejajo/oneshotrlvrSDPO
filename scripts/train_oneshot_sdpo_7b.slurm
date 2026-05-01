@@ -73,12 +73,15 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     KV cache per GPU: 20 - 7 = 13 GB.
 #     Ample for 32 seqs × 4096 tokens.
 #
-#   FSDP actor (param_offload=True, optimizer_offload=True):
-#     Sharded params across 4 GPUs live on CPU; no persistent GPU usage.
-#     Adam fp32 states (56 GB) → CPU (optimizer_offload=True).
-#     Peak during forward all-gather: one layer's params loaded transiently.
-#     Backward gradients accumulate in GPU but freed before optimizer step.
-#     Optimizer step (Adam) runs on CPU → _foreach_sqrt on CPU tensors ✓
+#   FSDP2 actor (strategy=fsdp2, offload_policy=True):
+#     FSDP1's optimizer_offload was a false fix: it manually moved Adam states
+#     to CPU between steps, then loaded them BACK to GPU before optimizer.step()
+#     (fsdp_workers.py:940 load_fsdp_optimizer). The step itself ran on GPU and
+#     OOM'd at _foreach_sqrt on the ~21 GB sharded fp32 Adam states.
+#     FSDP2 + CPUOffloadPolicy(pin_memory=True) is true CPU offload: params and
+#     optimizer states genuinely live on CPU, optimizer.step() runs on CPU.
+#     fsdp_workers.py:541-544 sets _is_offload_param/_is_offload_optimizer=False
+#     internally when offload_policy=True (they are no-ops, retained for clarity).
 #
 #   Ref/teacher (param_offload=True):
 #     Kept on CPU, loaded shard-by-shard during teacher forward. ✓
@@ -150,7 +153,7 @@ echo "  Actor"
 echo "    lr=1e-5  warmup_steps=20  entropy_coeff=0"
 echo "    ppo_mini_batch_size=32  ppo_max_token_len_per_gpu=4096"
 echo "    use_dynamic_bsz=True"
-echo "    param_offload=True  optimizer_offload=True  use_torch_compile=False"
+echo "    strategy=fsdp2  offload_policy=True  use_torch_compile=False"
 echo "----------------------------------------------------------------"
 echo "  SDPO"
 echo "    loss_mode=sdpo  alpha=0.5 (JSD)"
@@ -214,6 +217,8 @@ apptainer exec --nv \
     actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
+    actor_rollout_ref.actor.strategy=fsdp2 \
+    actor_rollout_ref.actor.fsdp_config.offload_policy=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \

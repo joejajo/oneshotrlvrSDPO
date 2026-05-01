@@ -153,7 +153,7 @@ echo "  Actor  [original SDPO run_sdpo.sh params]"
 echo "    lr=1e-6  warmup_steps=0  entropy_coeff=0"
 echo "    ppo_mini_batch_size=1  ppo_max_token_len_per_gpu=4096"
 echo "    use_dynamic_bsz=True"
-echo "    param_offload=True  optimizer_offload=True  use_torch_compile=False"
+echo "    strategy=fsdp2  offload_policy=True  use_torch_compile=False"
 echo "----------------------------------------------------------------"
 echo "  SDPO"
 echo "    loss_mode=sdpo  alpha=1.0 (reverse KL)"
@@ -217,6 +217,8 @@ apptainer exec --nv \
     actor_rollout_ref.actor.ppo_mini_batch_size=1 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
+    actor_rollout_ref.actor.strategy=fsdp2 \
+    actor_rollout_ref.actor.fsdp_config.offload_policy=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \
