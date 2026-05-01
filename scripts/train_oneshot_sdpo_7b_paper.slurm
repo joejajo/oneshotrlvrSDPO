@@ -162,7 +162,7 @@ echo "  Actor  [original SDPO run_sdpo.sh params]"
 echo "    lr=1e-6  warmup_steps=0  entropy_coeff=0"
 echo "    ppo_mini_batch_size=1  ppo_max_token_len_per_gpu=4096"
 echo "    use_dynamic_bsz=True"
-echo "    strategy=fsdp  optimizer=AdamW8bit (bitsandbytes)  use_torch_compile=False"
+echo "    strategy=fsdp  model_dtype=bfloat16  use_torch_compile=False"
 echo "----------------------------------------------------------------"
 echo "  SDPO"
 echo "    loss_mode=sdpo  alpha=1.0 (reverse KL)"
@@ -189,17 +189,6 @@ echo "    ref param_offload=True"
 echo "================================================================"
 
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
-
-# Verify bitsandbytes is available (compute nodes have no internet → cannot
-# pip install here). Run scripts/setup_bitsandbytes.sh on the LOGIN node first.
-echo "Verifying bitsandbytes availability ..."
-apptainer exec --nv \
-    --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
-    "${SIF}" \
-    bash -c "PYTHONPATH='${ONESHOT_DIR}:${SDPO_DIR}:${PKGS_DIR}' \
-             python -c 'import bitsandbytes; print(\"bitsandbytes:\", bitsandbytes.__version__); \
-                       from bitsandbytes.optim import AdamW8bit; print(\"AdamW8bit:    importable\")'" \
-    || { echo "ERROR: bitsandbytes not available. Run scripts/setup_bitsandbytes.sh on the LOGIN node, then resubmit." ; exit 1; }
 
 apptainer exec --nv \
     --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
@@ -239,11 +228,10 @@ apptainer exec --nv \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.strategy=fsdp \
+    actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \
     actor_rollout_ref.actor.use_torch_compile=False \
-    actor_rollout_ref.actor.optim.optimizer_impl=bitsandbytes.optim \
-    actor_rollout_ref.actor.optim.optimizer=AdamW8bit \
     \
     actor_rollout_ref.actor.policy_loss.loss_mode=sdpo \
     actor_rollout_ref.actor.self_distillation.include_environment_feedback=false \
@@ -260,6 +248,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
     \
+    actor_rollout_ref.ref.fsdp_config.model_dtype=bfloat16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.ref.fsdp_config.use_torch_compile=False \
     actor_rollout_ref.ref.use_torch_compile=False \
