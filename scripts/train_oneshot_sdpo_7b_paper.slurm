@@ -156,7 +156,7 @@ echo "  Rollout"
 echo "    n=8  temperature=1.0  top_p=1.0  top_k=-1"
 echo "    TP=2  gpu_mem_util=0.5  max_model_len=6144"
 echo "    max_num_seqs=32  max_num_batched_tokens=32768"
-echo "    val: n=1  temperature=0 (greedy)  top_p=1.0"
+echo "    val: n=1  do_sample=True  temperature=0.6  top_p=1.0"
 echo "----------------------------------------------------------------"
 echo "  Actor  [original SDPO run_sdpo.sh params]"
 echo "    lr=1e-6  warmup_steps=0  entropy_coeff=0"
@@ -215,7 +215,8 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
-    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
     actor_rollout_ref.rollout.val_kwargs.top_p=1.0 \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.agent.num_workers=1 \
