@@ -92,10 +92,19 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   include_environment_feedback=false  (run_sdpo.sh targets rich feedback;
 #                                        here we test scalar reward only)
 #
-# Memory budget (7B bf16, FSDP×4, optimizer_offload=True):
+# Memory budget (7B bf16, FSDP2×4, CPUOffloadPolicy):
 #   vLLM TP=2, gpu_memory_utilization=0.5 → 20 GB per TP GPU.
 #   7B weights / TP=2 = 7 GB per GPU. KV cache = 13 GB per TP GPU.
-#   FSDP shard: 14 GB / 4 = 3.5 GB per GPU on CPU (optimizer) + GPU (params).
+#
+#   FSDP2 actor (strategy=fsdp2, offload_policy=True):
+#     FSDP1's optimizer_offload was a false fix: it manually moved Adam states
+#     to CPU between steps, then loaded them BACK to GPU before optimizer.step()
+#     (fsdp_workers.py:940 load_fsdp_optimizer). The step itself ran on GPU and
+#     OOM'd at _foreach_sqrt on the ~21 GB sharded fp32 Adam states.
+#     FSDP2 + CPUOffloadPolicy(pin_memory=True) is true CPU offload: params and
+#     optimizer states genuinely live on CPU, optimizer.step() runs on CPU.
+#     fsdp_workers.py:541-544 sets _is_offload_param/_is_offload_optimizer=False
+#     internally when offload_policy=True (they are no-ops, retained for clarity).
 #
 #   Model: open-r1/Qwen2.5-Math-7B-RoPE-300k
 #     rope_theta=300000, max_position_embeddings=32768 (extended from base 4096).
@@ -124,7 +133,7 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     Disabling compile frees those buffers; actor update runs in eager mode.
 #
 #   ppo_max_token_len_per_gpu=4096: teacher logit matrix = 4096×152064×2 ≈ 1.25 GB;
-#   logsumexp peak ≈ 2.5 GB. With param_offload=True, GPU headroom ≥ 5 GB ✓
+#   logsumexp peak ≈ 2.5 GB. With FSDP2 CPUOffloadPolicy, optimizer runs on CPU → no GPU OOM ✓
 #   ppo_mini_batch_size=1 → single sequences; 4096 always covers one sequence.
 # ─────────────────────────────────────────────────────────────────────────────
 
