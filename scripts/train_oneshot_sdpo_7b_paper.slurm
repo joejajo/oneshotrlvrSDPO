@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=oneshot_sdpo_qwen3_8b_paper
+#SBATCH --job-name=sdpo_q3_8b_P
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:4
 #SBATCH --ntasks=1
