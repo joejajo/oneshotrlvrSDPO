@@ -102,70 +102,71 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
          "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
-# ── Qwen2.5-Math-7B SDPO on 4× A100-40GB ─────────────────────────────────────
+# ── Qwen2.5-Math-7B SDPO on 4 x A100-40GB ────────────────────────────────────
 #
-# Memory budget (7B bf16, FSDP×4, optimizer_offload=True):
+# Memory budget (7B bf16, FSDP1 x4, bf16 optimizer state, no offload):
 #
 #   vLLM (TP=2, gpu_memory_utilization=0.5):
-#     Each of the 2 TP GPUs reserves 0.5 × 40 = 20 GB for vLLM.
-#     7B weights in bf16 = 14 GB; with TP=2 each holds 7 GB weights.
-#     KV cache per GPU: 20 - 7 = 13 GB.
-#     Ample for 32 seqs × 4096 tokens.
+#     Each TP GPU reserves 0.5 x 40 = 20 GB for vLLM.
+#     7B weights bf16 / TP=2 = 7 GB per GPU. KV cache per GPU: 20 - 7 = 13 GB.
 #
-#   FSDP2 actor (strategy=fsdp2, offload_policy=True):
-#     FSDP1's optimizer_offload was a false fix: it manually moved Adam states
-#     to CPU between steps, then loaded them BACK to GPU before optimizer.step()
-#     (fsdp_workers.py:940 load_fsdp_optimizer). The step itself ran on GPU and
-#     OOM'd at _foreach_sqrt on the ~21 GB sharded fp32 Adam states.
-#     FSDP2 + CPUOffloadPolicy(pin_memory=True) is true CPU offload: params and
-#     optimizer states genuinely live on CPU, optimizer.step() runs on CPU.
-#     fsdp_workers.py:541-544 sets _is_offload_param/_is_offload_optimizer=False
-#     internally when offload_policy=True (they are no-ops, retained for clarity).
+#   FSDP1 actor (strategy=fsdp, model_dtype=bfloat16, optimizer_offload=False):
+#     The actor model loads in bf16 (fsdp_workers.py:325-327 default for actor
+#     was fp32; we override via model_dtype=bfloat16). FSDP shards bf16 params
+#     across 4 GPUs. The optimizer sees bf16 params and creates bf16 Adam states.
+#     Per GPU: params 3.81 GB + bf16 Adam 7.62 GB + grads (fp32 reduced) 7.62 GB
+#                + logit peak 1.25 GB + optimizer scratch 3.81 GB ~= 24 GB.
+#     vLLM is in sleep_mode (VLLM_SLEEP_LEVEL=2) during the actor step, so all
+#     40 GB are free per GPU. No OOM.
 #
-#   Ref/teacher (param_offload=True):
-#     Kept on CPU, loaded shard-by-shard during teacher forward. ✓
+#   Why we abandoned FSDP2 + CPUOffloadPolicy:
+#     fsdp2_load_full_state_dict deadlocked at init with NCCL BROADCAST timing
+#     out after 600s (rank-asymmetric op counts). torch 2.10.0 + offload policy
+#     is broken for this codepath.
+#
+#   Why we abandoned bitsandbytes 8-bit Adam:
+#     pip install --target=pkgs bitsandbytes pulled in conflicting torch 2.11.0,
+#     numpy 2.4.4, and ~30 other packages that shadow the container's torch
+#     2.10.0+cu129 / vllm 0.17.0 via PYTHONPATH and break vllm + flash-attn.
+#
+#   Ref/teacher (model_dtype=bfloat16, param_offload=True):
+#     bf16 ref params on CPU, loaded shard-by-shard during teacher forward.
+#     EMA update (dp_actor.py:151) sees both teacher and student bf16, no cast.
 #
 #   Model: open-r1/Qwen2.5-Math-7B-RoPE-300k
-#     rope_theta=300000, max_position_embeddings=32768 (extended from base 4096).
-#     Same weights as Qwen2.5-Math-7B; only RoPE config changed.
+#     rope_theta=300000, max_position_embeddings=32768.
 #
-#   max_model_len config note:
+#   max_model_len note:
 #     vllm_async_server.py:225 unconditionally overwrites max_model_len with
 #     get_max_position_embeddings(hf_config) = 32768 for RoPE-300k.
-#     Our max_model_len=6144 setting is IGNORED at runtime; vLLM uses 32768.
-#     Safe: our sequences never exceed reprompt(2400)+response(2048)=4448 tok.
-#     max_num_batched_tokens=32768 aligns with actual vLLM max_model_len=32768. ✓
+#     Our max_model_len=6144 is IGNORED; vLLM uses 32768. Safe: our sequences
+#     never exceed reprompt(2400)+response(2048)=4448 tok.
 #
-#   VLLM_SLEEP_LEVEL note:
-#     verl/third_party/vllm/__init__.py auto-detects level=2 for vllm>=0.8.5.
-#     vLLM 0.17.0 > 0.8.5 → VLLM_SLEEP_LEVEL=2 in Python without any env var.
-#     Our export VLLM_SLEEP_LEVEL=2 sets an env var nothing reads; harmless.
-#     enable_sleep_mode=True (default in RolloutConfig) → vLLM frees weights
-#     AND KV cache during training, giving full 40 GB for actor update. ✓
-#
-#   max_reprompt_len=2400: π₁ reprompt worst-case = 2206 tok < 2400 → no truncation ✓
-#   reprompt_truncation=right: SDPO default; irrelevant since 2400>2206.
+#   VLLM_SLEEP_LEVEL=2: auto-detected by verl for vllm>=0.8.5; our export is
+#     decorative. enable_sleep_mode=True (RolloutConfig default) frees vLLM
+#     weights AND KV cache during actor update.
 #
 #   use_torch_compile=False (actor + ref):
-#     Default in actor.yaml is use_torch_compile=True. Torch.compile/inductor buffers
-#     consume 5-8 GB extra GPU memory during actor update ("Online softmax is disabled
-#     on the fly since Inductor decides to split the reduction"). With compile enabled,
-#     35.88 GB was in use leaving only 3.57 GB — insufficient for logsumexp (needs 5 GB).
-#     Disabling compile frees those buffers; actor update runs in eager mode (~1.5× slower
-#     per-step but no OOM). Ref also needs False since it shares FSDP state.
+#     Inductor buffers consume 5-8 GB extra GPU memory; disabling runs in eager
+#     mode. Set on both .actor and .actor.fsdp_config (verl reads both).
 #
-#   ppo_max_token_len_per_gpu=4096: teacher logit matrix = 4096×152064×2 ≈ 1.25 GB;
-#   logsumexp peak ≈ 2.5 GB. With FSDP2 CPUOffloadPolicy, optimizer runs on CPU → no GPU OOM ✓
-#   (OOM progression: 16384 logsumexp → 8192 backward → 4096+FSDP1 optimizer → FSDP2 fixed)
+#   ppo_max_token_len_per_gpu=4096: teacher logit peak = 4096*152064*2 ~= 1.25 GB;
+#     logsumexp peak ~= 2.5 GB. Fits comfortably.
+#
+#   GPU health pre-flight:
+#     Some nodes have GPUs in ERR! state where nvidia-smi reports utilization
+#     as N/A. The transformer_engine module imported by megatron at module
+#     level fires torch.cuda.current_device() which crashes with
+#     DeferredCudaCallError. We pre-check via nvidia-smi before any Python
+#     starts and `scontrol requeue` to a different node if any GPU is bad.
 #
 # Sampling hyperparameters:
-#   top_p=1.0, top_k=-1: full distribution, no nucleus / top-k truncation.
-#   temperature=1.0: training rollouts (original SDPO default).
-#   val_kwargs.temperature=0.6, do_sample=True: matches training-time sampling.
+#   top_p=1.0, top_k=-1: full distribution.
+#   temperature=1.0 train, 0.6 val, do_sample=True.
 #
-# SDPO Condition A settings (scalar reward, no environment feedback):
+# SDPO Condition A (scalar reward, no environment feedback):
 #   alpha=0.5 (JSD), distillation_topk=100, teacher_update_rate=0.05, lr=1e-5.
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 echo "================================================================"
 echo "  One-Shot-RLVR SDPO — Condition A (scalar reward, no feedback)"
