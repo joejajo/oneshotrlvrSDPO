@@ -243,7 +243,7 @@ apptainer exec --nv \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.enable_activation_offload=True \
     actor_rollout_ref.model.trust_remote_code=True \
-    'data.apply_chat_template_kwargs={enable_thinking: false}' \
+    '+data.apply_chat_template_kwargs={enable_thinking: false}' \
     \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
