@@ -6,6 +6,7 @@
 #SBATCH --time=16:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_rope/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_rope/logs/train_%j.err
+#SBATCH --exclude=tg095
 
 set -euo pipefail
 
@@ -187,6 +188,7 @@ apptainer exec --nv \
     "${SIF}" \
     python -m verl.trainer.main_ppo \
     --config-name ppo_trainer \
+    hydra.verbose=true \
     \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \

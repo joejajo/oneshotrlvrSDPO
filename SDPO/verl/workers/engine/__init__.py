@@ -34,13 +34,13 @@ try:
     from .mindspeed import MindspeedEngineWithLMHead
 
     __all__ += ["MindspeedEngineWithLMHead"]
-except ImportError:
+except Exception:
     MindspeedEngineWithLMHead = None
 
 try:
     from .megatron import MegatronEngine, MegatronEngineWithLMHead
 
     __all__ += ["MegatronEngine", "MegatronEngineWithLMHead"]
-except ImportError:
+except Exception:
     MegatronEngine = None
     MegatronEngineWithLMHead = None
