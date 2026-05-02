@@ -215,7 +215,7 @@ echo "    train_batch_size=32  max_prompt_len=1024  max_resp_len=2048"
 echo "    val_batch_size=500"
 echo "----------------------------------------------------------------"
 echo "  Training"
-echo "    total_steps=50  save_freq=5  test_freq=5"
+echo "    total_steps=300  save_freq=5  test_freq=5"
 echo "    val_before_train=True  log_val_generations=16"
 echo "    ref param_offload=True"
 echo "================================================================"
@@ -307,7 +307,7 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=50 \
+    trainer.total_training_steps=300 \
     trainer.save_freq=5 \
     trainer.test_freq=5 \
     trainer.val_before_train=True \
