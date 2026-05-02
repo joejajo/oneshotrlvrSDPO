@@ -201,7 +201,7 @@ echo "    loss_mode=sdpo  alpha=1.0 (reverse KL)"
 echo "    teacher_regularization=ema  teacher_update_rate=0.01"
 echo "    distillation_topk=20  full_logit_distillation=True"
 echo "    is_clip=2.0  distillation_add_tail=True"
-echo "    max_reprompt_len=2400  reprompt_truncation=right"
+echo "    max_reprompt_len=2600  reprompt_truncation=left"
 echo "    include_environment_feedback=False"
 echo "    success_reward_threshold=1.0"
 echo "    dont_reprompt_on_self_success=True"
@@ -275,8 +275,8 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2400 \
-    actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2600 \
+    actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=20 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \

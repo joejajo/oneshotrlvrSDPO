@@ -150,8 +150,18 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     Inductor buffers consume 5-8 GB extra GPU memory; disabling runs in eager
 #     mode. Set on both .actor and .actor.fsdp_config (verl reads both).
 #
-#   ppo_max_token_len_per_gpu=4096: teacher logit peak = 4096*152064*2 ~= 1.25 GB;
-#     logsumexp peak ~= 2.5 GB. Fits comfortably.
+#   ppo_max_token_len_per_gpu=4096: controls STUDENT micro-batch sizing only.
+#     prepare_dynamic_batch (seqlen_balancing.py:374) uses input_ids (prompt+response,
+#     max 3072 tok). Teacher forward processes full teacher_input_ids (reprompt+response,
+#     max 2600+2048=4648 tok) in a single no_grad pass — NOT governed by this limit.
+#     Student logit peak = 3072*152064*2 = 935 MB. Teacher logit peak on response
+#     tokens only = 2048*152064*2 = 625 MB. Both comfortably fit.
+#   max_reprompt_len=2600: π₁ question (~315 tok) + sibling solution (up to 2048 tok)
+#     + solution_template overhead (~6 tok) + tail (~10 tok) + chat wrapper (~10 tok)
+#     = max 2409 tok. Buffer of 191 tok ensures truncation never fires.
+#     reprompt_truncation=left (safety): if truncation did fire, left drops the
+#     start of the question (recoverable) vs right which drops <|im_end|> and the
+#     "Correctly solve" instruction, breaking the chat format entirely.
 #
 #   GPU health pre-flight:
 #     Some nodes have GPUs in ERR! state where nvidia-smi reports utilization
@@ -200,7 +210,7 @@ echo "    loss_mode=sdpo  alpha=0.5 (JSD)"
 echo "    teacher_regularization=ema  teacher_update_rate=0.05"
 echo "    distillation_topk=100  full_logit_distillation=True"
 echo "    is_clip=2.0  distillation_add_tail=True"
-echo "    max_reprompt_len=2400  reprompt_truncation=right"
+echo "    max_reprompt_len=2600  reprompt_truncation=left"
 echo "    include_environment_feedback=False"
 echo "    success_reward_threshold=1.0"
 echo "    dont_reprompt_on_self_success=True"
@@ -274,8 +284,8 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2400 \
-    actor_rollout_ref.actor.self_distillation.reprompt_truncation=right \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2600 \
+    actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
     actor_rollout_ref.actor.self_distillation.is_clip=2.0 \
