@@ -6,9 +6,47 @@
 #SBATCH --time=16:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_paper_rope/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_paper_rope/logs/train_%j.err
-#SBATCH --exclude=tg095
+#SBATCH --requeue
 
 set -euo pipefail
+
+# ── GPU health check (handles random bad nodes anywhere in the cluster) ────────
+# Detects GPUs in ERR! state where nvidia-smi reports utilization as N/A.
+# When found, requeues the job so SLURM tries a different allocation.
+gpu_health_check() {
+    local node="$(hostname)"
+    local nv_out
+    if ! nv_out=$(nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used --format=csv,noheader 2>&1); then
+        echo "ERROR: nvidia-smi failed on ${node}: ${nv_out}"
+        return 1
+    fi
+    echo "----- GPU enumeration on ${node} -----"
+    echo "${nv_out}"
+    echo "--------------------------------------"
+    local bad=0
+    while IFS=, read -r idx name util mem; do
+        idx=$(echo "${idx}" | xargs)
+        util=$(echo "${util}" | xargs)
+        # CUDA reports utilization as "[N/A]" or "N/A" or "ERR!" when the GPU is
+        # in an error state. A healthy GPU returns a percentage like "0 %" or "97 %".
+        if [[ "${util}" == *"N/A"* ]] || [[ "${util}" == *"ERR"* ]] || [[ -z "${util// }" ]]; then
+            echo "ERROR: GPU ${idx} on ${node} unhealthy (utilization='${util}')"
+            bad=$((bad + 1))
+        fi
+    done <<< "${nv_out}"
+    return ${bad}
+}
+
+if ! gpu_health_check; then
+    echo "================================================================"
+    echo "  BAD NODE DETECTED on $(hostname) at $(date)"
+    echo "  Requeueing job ${SLURM_JOB_ID} so SLURM allocates a different node"
+    echo "================================================================"
+    scontrol requeue "${SLURM_JOB_ID}" || echo "scontrol requeue failed (may not be permitted); exiting with TEMPFAIL anyway"
+    exit 75
+fi
+echo "GPU health check passed on $(hostname)."
+
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
