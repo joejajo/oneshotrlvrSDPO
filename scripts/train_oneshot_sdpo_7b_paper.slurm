@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=oneshot_sdpo_7b_paper_rope
+#SBATCH --job-name=oneshot_sdpo_qwen3_8b_paper
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:4
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_paper_rope/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_paper_rope/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_8b_qwen3_paper/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_8b_qwen3_paper/logs/train_%j.err
 #SBATCH --requeue
 
 set -euo pipefail
@@ -51,10 +51,10 @@ echo "GPU health check passed on $(hostname)."
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_sdpo_7b_paper_rope
+OUTPUT_ROOT=${PROJECT_ROOT}/output_sdpo_8b_qwen3_paper
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
-MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-7B-RoPE-300k
+MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen3-8B
 
 TRAIN_PARQUET=${ONESHOT_DIR}/data/pi1_r128.parquet
 EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
@@ -102,7 +102,7 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
          "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
-# ── Original SDPO parameters (no rich feedback) ───────────────────────────────
+# ── Original SDPO parameters (no rich feedback) — Qwen3-8B ───────────────────
 #
 # Hyperparameters taken verbatim from lasgroup/SDPO:
 #   experiments/rich_feedback/run_sdpo.sh  — override values
@@ -123,7 +123,7 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   rollout_is=token           sdpo.yaml + run_sdpo.sh
 #   rollout_is_threshold=2.0   sdpo.yaml
 #   adv_estimator=grpo         sdpo.yaml
-#   norm_adv_by_std_in_grpo=False  sdpo.yaml
+#   norm_adv_by_std_in_grpo=True  our override (unnorm preserves reward scale)
 #   is_clip=2.0                sdpo.yaml
 #   loss_mode=sdpo             sdpo.yaml
 #
@@ -131,15 +131,14 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #   include_environment_feedback=false  (run_sdpo.sh targets rich feedback;
 #                                        here we test scalar reward only)
 #
-# Memory budget (7B bf16, FSDP1 x4, bf16 optimizer state, no offload):
-#   vLLM TP=2, gpu_memory_utilization=0.5 -> 20 GB per TP GPU. KV cache = 13 GB.
+# Memory budget (8B bf16, FSDP1 x4, bf16 optimizer state, no offload):
+#   vLLM TP=2, gpu_memory_utilization=0.5 -> 20 GB per TP GPU. KV cache = 12 GB.
 #
 #   FSDP1 actor (strategy=fsdp, model_dtype=bfloat16, optimizer_offload=False):
-#     fsdp_workers.py:325-327 defaults actor torch_dtype to fp32; we override
-#     via model_dtype=bfloat16. The model loads bf16; FSDP shards bf16 params
-#     across 4 GPUs; optimizer sees bf16 params and creates bf16 Adam states.
-#     Per GPU: params 3.81 GB + bf16 Adam 7.62 GB + fp32 grads 7.62 GB
-#                + logit peak 1.25 GB + scratch 3.81 GB ~= 24 GB. Fits 40 GB.
+#     FSDP shards bf16 params across 4 GPUs; optimizer sees bf16 and creates
+#     bf16 Adam states.
+#     Per GPU: params 4 GB + bf16 Adam 8 GB + fp32 grads 8 GB
+#                + logit peak ~0.72 GB + scratch ~4 GB ~= 25 GB. Fits 40 GB.
 #     vLLM in sleep_mode during the actor step frees its 20 GB; no OOM.
 #
 #   Why FSDP2 was abandoned:
@@ -147,7 +146,7 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     out after 600s. torch 2.10.0 + CPUOffloadPolicy is broken for this path.
 #
 #   Why bitsandbytes 8-bit Adam was abandoned:
-#     pip --target install pulled in torch 2.11.0, numpy 2.4.4, and ~30 packages
+#     pip --target pulled in torch 2.11.0, numpy 2.4.4, and ~30 packages
 #     that shadow the container's torch 2.10.0+cu129 / vllm 0.17.0 and break
 #     vllm + flash-attn. bf16 native saves enough memory without the conflict.
 #
@@ -155,11 +154,20 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     bf16 ref params on CPU, loaded shard-by-shard during teacher forward.
 #     EMA update (dp_actor.py:151) sees both teacher and student bf16, no cast.
 #
-#   Model: open-r1/Qwen2.5-Math-7B-RoPE-300k (rope_theta=300000).
+#   Model: Qwen3-8B (vocab_size=151936, max_position_embeddings=32768).
+#
+#   Qwen3 thinking mode:
+#     Disabled via data.apply_chat_template_kwargs={enable_thinking: false}.
+#     SDPO reads this in rl_dataset.py:115 and ray_trainer.py:749 and passes
+#     enable_thinking=False to all tokenizer.apply_chat_template calls.
+#
+#   vLLM compatibility note:
+#     vLLM 0.17.0 predates Qwen3. Container uses trust_remote_code + transformers
+#     HF modeling fallback. Verify transformers has Qwen3ForCausalLM before run.
 #
 #   max_model_len note:
 #     vllm_async_server.py:225 overwrites max_model_len with
-#     get_max_position_embeddings(hf_config) = 32768 for RoPE-300k.
+#     get_max_position_embeddings(hf_config) = 32768 for Qwen3-8B.
 #     Our 6144 is IGNORED; vLLM uses 32768. Safe.
 #
 #   ppo_mini_batch_size=1 (paper run): single sequences; 4096 covers one seq.
@@ -171,7 +179,7 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 
 echo "================================================================"
 echo "  One-Shot-RLVR SDPO — Paper §3 (original SDPO params, no feedback)"
-echo "  Model : Qwen2.5-Math-7B-RoPE-300k   Hardware : 4× A100-40GB"
+echo "  Model : Qwen3-8B                     Hardware : 4× A100-40GB"
 echo "================================================================"
 echo "  SLURM job     : ${SLURM_JOB_ID}  name=${SLURM_JOB_NAME}"
 echo "  Node          : $(hostname)   started: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -235,6 +243,7 @@ apptainer exec --nv \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.enable_activation_offload=True \
     actor_rollout_ref.model.trust_remote_code=True \
+    'data.apply_chat_template_kwargs={enable_thinking: false}' \
     \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
@@ -312,7 +321,7 @@ apptainer exec --nv \
     trainer.test_freq=20 \
     trainer.val_before_train=True \
     trainer.log_val_generations=16 \
-    trainer.experiment_name=oneshot_sdpo_qwen25math_7b_rope300k_paper \
+    trainer.experiment_name=oneshot_sdpo_qwen3_8b_paper \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.resume_mode=disable \

@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=oneshot_sdpo_7b_rope
+#SBATCH --job-name=oneshot_sdpo_qwen3_8b
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:4
 #SBATCH --ntasks=1
 #SBATCH --time=16:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_rope/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_7b_rope/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_8b_qwen3/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sdpo_8b_qwen3/logs/train_%j.err
 #SBATCH --requeue
 
 set -euo pipefail
@@ -51,10 +51,10 @@ echo "GPU health check passed on $(hostname)."
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_sdpo_7b_rope
+OUTPUT_ROOT=${PROJECT_ROOT}/output_sdpo_8b_qwen3
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
-MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-7B-RoPE-300k
+MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen3-8B
 
 TRAIN_PARQUET=${ONESHOT_DIR}/data/pi1_r128.parquet
 EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
@@ -102,21 +102,20 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
          "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
-# ── Qwen2.5-Math-7B SDPO on 4 x A100-40GB ────────────────────────────────────
+# ── Qwen3-8B SDPO on 4 x A100-40GB ───────────────────────────────────────────
 #
-# Memory budget (7B bf16, FSDP1 x4, bf16 optimizer state, no offload):
+# Memory budget (8B bf16, FSDP1 x4, bf16 optimizer state, no offload):
 #
 #   vLLM (TP=2, gpu_memory_utilization=0.5):
 #     Each TP GPU reserves 0.5 x 40 = 20 GB for vLLM.
-#     7B weights bf16 / TP=2 = 7 GB per GPU. KV cache per GPU: 20 - 7 = 13 GB.
+#     8B weights bf16 / TP=2 = 8 GB per GPU. KV cache per GPU: 20 - 8 = 12 GB.
 #
 #   FSDP1 actor (strategy=fsdp, model_dtype=bfloat16, optimizer_offload=False):
-#     The actor model loads in bf16 (fsdp_workers.py:325-327 default for actor
-#     was fp32; we override via model_dtype=bfloat16). FSDP shards bf16 params
-#     across 4 GPUs. The optimizer sees bf16 params and creates bf16 Adam states.
-#     Per GPU: params 3.81 GB + bf16 Adam 7.62 GB + grads (fp32 reduced) 7.62 GB
-#                + logit peak 1.25 GB + optimizer scratch 3.81 GB ~= 24 GB.
-#     vLLM is in sleep_mode (VLLM_SLEEP_LEVEL=2) during the actor step, so all
+#     FSDP shards bf16 params across 4 GPUs; optimizer sees bf16 and creates
+#     bf16 Adam states.
+#     Per GPU: params 4 GB + bf16 Adam 8 GB + fp32 grads 8 GB
+#                + logit peak ~0.72 GB + scratch ~4 GB ~= 25 GB.
+#     vLLM is in sleep_mode (VLLM_SLEEP_LEVEL=2) during actor step, so all
 #     40 GB are free per GPU. No OOM.
 #
 #   Why we abandoned FSDP2 + CPUOffloadPolicy:
@@ -133,42 +132,46 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #     bf16 ref params on CPU, loaded shard-by-shard during teacher forward.
 #     EMA update (dp_actor.py:151) sees both teacher and student bf16, no cast.
 #
-#   Model: open-r1/Qwen2.5-Math-7B-RoPE-300k
-#     rope_theta=300000, max_position_embeddings=32768.
+#   Model: Qwen3-8B
+#     vocab_size=151,936, max_position_embeddings=32768 (GQA, 32 attn heads,
+#     8 KV heads, 36 hidden layers).
+#
+#   Qwen3 thinking mode:
+#     Qwen3 generates <think>...</think> traces by default. This is disabled via
+#     data.apply_chat_template_kwargs={enable_thinking: false} which SDPO passes
+#     to tokenizer.apply_chat_template for both training data and reprompt
+#     tokenization (ray_trainer.py:749-757). remove_thinking_from_demonstration
+#     stays false because thinking is disabled at generation time.
+#
+#   vLLM compatibility note:
+#     vLLM 0.17.0 predates Qwen3 (April 2025). The container uses
+#     trust_remote_code=True + transformers HF modeling code as fallback.
+#     Verify transformers supports Qwen3ForCausalLM before submitting.
 #
 #   max_model_len note:
-#     vllm_async_server.py:225 unconditionally overwrites max_model_len with
-#     get_max_position_embeddings(hf_config) = 32768 for RoPE-300k.
+#     vllm_async_server.py:225 overwrites max_model_len with
+#     get_max_position_embeddings(hf_config) = 32768 for Qwen3-8B.
 #     Our max_model_len=6144 is IGNORED; vLLM uses 32768. Safe: our sequences
-#     never exceed reprompt(2400)+response(2048)=4448 tok.
+#     never exceed reprompt(2600)+response(2048)=4648 tok.
 #
-#   VLLM_SLEEP_LEVEL=2: auto-detected by verl for vllm>=0.8.5; our export is
-#     decorative. enable_sleep_mode=True (RolloutConfig default) frees vLLM
-#     weights AND KV cache during actor update.
+#   VLLM_SLEEP_LEVEL=2: enable_sleep_mode=True frees vLLM weights AND KV cache
+#     during actor update.
 #
 #   use_torch_compile=False (actor + ref):
-#     Inductor buffers consume 5-8 GB extra GPU memory; disabling runs in eager
-#     mode. Set on both .actor and .actor.fsdp_config (verl reads both).
+#     Inductor buffers consume 5-8 GB extra GPU memory; disabling runs in eager.
 #
 #   ppo_max_token_len_per_gpu=4096: controls STUDENT micro-batch sizing only.
-#     prepare_dynamic_batch (seqlen_balancing.py:374) uses input_ids (prompt+response,
-#     max 3072 tok). Teacher forward processes full teacher_input_ids (reprompt+response,
-#     max 2600+2048=4648 tok) in a single no_grad pass — NOT governed by this limit.
-#     Student logit peak = 3072*152064*2 = 935 MB. Teacher logit peak on response
-#     tokens only = 2048*152064*2 = 625 MB. Both comfortably fit.
+#     Student logit peak = 2363*151936*2 = 718 MB. Teacher logit peak on response
+#     tokens only = 2048*151936*2 = 623 MB. Both comfortably fit.
 #   max_reprompt_len=2600: π₁ question (~315 tok) + sibling solution (up to 2048 tok)
-#     + solution_template overhead (~6 tok) + tail (~10 tok) + chat wrapper (~10 tok)
-#     = max 2409 tok. Buffer of 191 tok ensures truncation never fires.
-#     reprompt_truncation=left (safety): if truncation did fire, left drops the
-#     start of the question (recoverable) vs right which drops <|im_end|> and the
-#     "Correctly solve" instruction, breaking the chat format entirely.
+#     + template overhead (~57 tok) = max 2420 tok. Buffer of 180 tok.
+#     reprompt_truncation=left (safety): truncates start of question vs right
+#     which drops <|im_end|> and breaks chat format.
 #
 #   GPU health pre-flight:
 #     Some nodes have GPUs in ERR! state where nvidia-smi reports utilization
-#     as N/A. The transformer_engine module imported by megatron at module
-#     level fires torch.cuda.current_device() which crashes with
-#     DeferredCudaCallError. We pre-check via nvidia-smi before any Python
-#     starts and `scontrol requeue` to a different node if any GPU is bad.
+#     as N/A. We pre-check via nvidia-smi before any Python starts and
+#     `scontrol requeue` to a different node if any GPU is bad.
 #
 # Sampling hyperparameters:
 #   top_p=1.0, top_k=-1: full distribution.
@@ -180,7 +183,7 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 
 echo "================================================================"
 echo "  One-Shot-RLVR SDPO — Condition A (scalar reward, no feedback)"
-echo "  Model : Qwen2.5-Math-7B-RoPE-300k   Hardware : 4× A100-40GB"
+echo "  Model : Qwen3-8B                     Hardware : 4× A100-40GB"
 echo "================================================================"
 echo "  SLURM job     : ${SLURM_JOB_ID}  name=${SLURM_JOB_NAME}"
 echo "  Node          : $(hostname)   started: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -244,6 +247,7 @@ apptainer exec --nv \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.enable_activation_offload=True \
     actor_rollout_ref.model.trust_remote_code=True \
+    'data.apply_chat_template_kwargs={enable_thinking: false}' \
     \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
@@ -321,7 +325,7 @@ apptainer exec --nv \
     trainer.test_freq=20 \
     trainer.val_before_train=True \
     trainer.log_val_generations=16 \
-    trainer.experiment_name=oneshot_sdpo_qwen25math_7b_rope300k_pi1 \
+    trainer.experiment_name=oneshot_sdpo_qwen3_8b_pi1 \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.resume_mode=disable \
