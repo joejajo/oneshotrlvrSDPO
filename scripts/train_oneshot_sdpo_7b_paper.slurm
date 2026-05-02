@@ -207,7 +207,7 @@ echo "    success_reward_threshold=1.0"
 echo "    dont_reprompt_on_self_success=True"
 echo "----------------------------------------------------------------"
 echo "  Algorithm"
-echo "    adv_estimator=grpo  norm_adv_by_std=False"
+echo "    adv_estimator=grpo  norm_adv_by_std=True"
 echo "    rollout_is=token  rollout_is_threshold=2.0"
 echo "----------------------------------------------------------------"
 echo "  Data"
@@ -287,7 +287,7 @@ apptainer exec --nv \
     actor_rollout_ref.ref.use_torch_compile=False \
     \
     algorithm.adv_estimator=grpo \
-    algorithm.norm_adv_by_std_in_grpo=False \
+    algorithm.norm_adv_by_std_in_grpo=True \
     algorithm.rollout_correction.rollout_is=token \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
     \
