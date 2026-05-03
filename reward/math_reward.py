@@ -518,8 +518,8 @@ def extract_answer(passage: str) -> str:
 # Gracefully disabled if latex2sympy2 or regex are not installed.
 # ---------------------------------------------------------------------------
 
-# latex2sympy2 generated parser targets ANTLR 4.7.2 but we install 4.9.3.
-# The generated code calls: RuntimeMetaData.checkVersion("4.7.2", RuntimeMetaData.VERSION)
+# latex2sympy2 generated parser targets ANTLR 4.9.3; install that version:
+# pip install --target=pkgs antlr4-python3-runtime==4.9.3
 # RuntimeMetaData lives in antlr4/RuntimeMetaData.py (not antlr4/Runtime.py).
 # Patch the class method before importing grader.py (which triggers latex2sympy2 parser load).
 try:
