@@ -120,7 +120,7 @@ mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" \
 #
 # Memory budget unchanged from condA — batch_size affects step time, not memory:
 #   Actor update micro-batches by ppo_max_token_len_per_gpu=8192 regardless.
-#   vLLM generates 64×8=512 sequences in its internal batches of max_num_seqs=64.
+#   vLLM generates 64×8=512 sequences in its internal batches of max_num_seqs=32.
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "================================================================"
@@ -141,7 +141,7 @@ echo "----------------------------------------------------------------"
 echo "  Rollout"
 echo "    n=8  temperature=1.0  top_p=1.0  top_k=-1"
 echo "    TP=1  gpu_mem_util=0.4  max_model_len=8192"
-echo "    max_num_seqs=64  max_num_batched_tokens=16384"
+echo "    max_num_seqs=32  max_num_batched_tokens=16384"
 echo "    val: n=1  do_sample=True  temperature=0.6  top_p=1.0"
 echo "----------------------------------------------------------------"
 echo "  Actor"
@@ -196,7 +196,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.rollout.max_model_len=8192 \
-    actor_rollout_ref.rollout.max_num_seqs=64 \
+    actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
@@ -271,5 +271,5 @@ apptainer exec --nv \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.max_actor_ckpt_to_keep=1 \
     trainer.default_hdfs_dir=null \
-    +ray_kwargs.ray_init.object_store_memory=2147483648 \
+    +ray_kwargs.ray_init.object_store_memory=5368709120 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
