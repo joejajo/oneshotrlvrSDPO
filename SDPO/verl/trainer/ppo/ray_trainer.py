@@ -502,6 +502,12 @@ class RayPPOTrainer:
             sample_gts = [item.non_tensor_batch.get("reward_model", {}).get("ground_truth", None) for item in batch]
 
             reward_extra_infos_to_dump = reward_extra_infos_dict.copy()
+
+            # Add SDPO reprompt debug fields to JSONL if available (set by _maybe_build_self_distillation_batch).
+            for _sdpo_key in ("sibling_solution", "sdpo_feedback", "teacher_prompt"):
+                if _sdpo_key in batch.non_tensor_batch:
+                    reward_extra_infos_to_dump[_sdpo_key] = batch.non_tensor_batch[_sdpo_key].tolist()
+
             if "request_id" in batch.non_tensor_batch:
                 reward_extra_infos_dict.setdefault(
                     "request_id",
@@ -801,6 +807,20 @@ class RayPPOTrainer:
             "self_distillation/teacher_prompt_truncated_fraction": teacher_prompt_truncated_fraction,
             "self_distillation/teacher_total_len_mean": (prompt_lens + response_lens).mean().item(),
         }
+        # Store SDPO debug strings in batch.non_tensor_batch for JSONL logging.
+        # Available in _log_rollout_data (called after _update_actor).
+        batch.non_tensor_batch["sibling_solution"] = np.array(
+            [s if s is not None else "" for s in solution_strs], dtype=object
+        )
+        batch.non_tensor_batch["sdpo_feedback"] = np.array(
+            [f if f is not None else "" for f in feedback_list], dtype=object
+        )
+        batch.non_tensor_batch["teacher_prompt"] = np.array(
+            [self.tokenizer.decode(ids, skip_special_tokens=True)
+             for ids in teacher_prompt["input_ids"]],
+            dtype=object,
+        )
+
         return DataProto.from_dict(tensors={
             "teacher_input_ids": teacher_input_ids,
             "teacher_attention_mask": teacher_attention_mask,
