@@ -157,7 +157,7 @@ echo "    val: n=1  do_sample=True  temperature=0.6  top_p=1.0"
 echo "----------------------------------------------------------------"
 echo "  Actor"
 echo "    lr=1e-5  warmup_steps=10  entropy_coeff=0"
-echo "    ppo_mini_batch_size=32  ppo_max_token_len_per_gpu=8192"
+echo "    ppo_mini_batch_size=32  ppo_max_token_len_per_gpu=4096"
 echo "    strategy=fsdp  model_dtype=bfloat16  use_torch_compile=False"
 echo "----------------------------------------------------------------"
 echo "  SDPO Condition D"
@@ -179,7 +179,7 @@ echo "    train_batch_size=32  max_prompt_len=1024  max_resp_len=3072"
 echo "    val_batch_size=500"
 echo "----------------------------------------------------------------"
 echo "  Training"
-echo "    total_steps=300  save_freq=20  test_freq=20"
+echo "    total_steps=300  save_freq=10  test_freq=10"
 echo "    val_before_train=True  log_val_generations=16"
 echo "    ref param_offload=True"
 echo "================================================================"
@@ -222,10 +222,10 @@ apptainer exec --nv \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=32 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=8192 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.strategy=fsdp \
     actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \
     actor_rollout_ref.actor.use_torch_compile=False \
     \
@@ -272,14 +272,14 @@ apptainer exec --nv \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
     trainer.total_training_steps=300 \
-    trainer.save_freq=20 \
-    trainer.test_freq=20 \
+    trainer.save_freq=10 \
+    trainer.test_freq=10 \
     trainer.val_before_train=True \
     trainer.log_val_generations=16 \
     trainer.experiment_name=oneshot_sdpo_qwen25_1b_pi1_condD \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
-    trainer.resume_mode=disable \
+    trainer.resume_mode=auto \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.max_actor_ckpt_to_keep=1 \

@@ -297,5 +297,5 @@ apptainer exec --nv \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.max_actor_ckpt_to_keep=1 \
     trainer.default_hdfs_dir=null \
-    +ray_kwargs.ray_init.object_store_memory=2147483648 \
+    +ray_kwargs.ray_init.object_store_memory=6442450944 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
