@@ -147,6 +147,11 @@ echo "================================================================"
 #   reprompt_truncation=left → preserves end of solution + re-instruction if truncated
 #   include_environment_feedback=false → scalar reward only, no verifier text
 #   entropy_coeff=0 → no entropy regularisation (SDPO paper default)
+#   val_kwargs.temperature=0.6, do_sample=True → stochastic validation (matches train temp)
+#   save_freq=20, max_actor_ckpt_to_keep=1 → checkpoint every 20 steps, keep only latest
+#   test_freq=20 → validate every 20 steps (50 validation points over 1000 steps)
+#   rollout_data_dir set → training JSONL logs: input, output, score, extracted_answer,
+#     feedback, teacher_input (decoded reprompt = proof of distillation for thesis)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -174,9 +179,9 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.max_num_seqs=64 \
     actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
-    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
-    actor_rollout_ref.rollout.val_kwargs.top_p=1.0 \
-    actor_rollout_ref.rollout.val_kwargs.do_sample=False \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
+    actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.agent.num_workers=1 \
     \
@@ -230,8 +235,8 @@ apptainer exec --nv \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
     trainer.total_training_steps=1000 \
-    trainer.save_freq=50 \
-    trainer.test_freq=1 \
+    trainer.save_freq=20 \
+    trainer.test_freq=20 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
     trainer.experiment_name=thesis_sdpo \
@@ -240,7 +245,7 @@ apptainer exec --nv \
     trainer.resume_mode=disable \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
-    trainer.max_actor_ckpt_to_keep=3 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=4294967296 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"

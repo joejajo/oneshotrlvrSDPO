@@ -507,6 +507,12 @@ class RayPPOTrainer:
                     "request_id",
                     batch.non_tensor_batch["request_id"].tolist(),
                 )
+            # Decode teacher reprompt context for SDPO — saved as "teacher_input" in JSONL.
+            # teacher_input_ids = original_prompt + reprompt(sibling solution) + student_response.
+            if "teacher_input_ids" in batch.batch:
+                reward_extra_infos_to_dump["teacher_input"] = self.tokenizer.batch_decode(
+                    batch.batch["teacher_input_ids"].cpu(), skip_special_tokens=True
+                )
 
             self._dump_generations(
                 inputs=inputs,
