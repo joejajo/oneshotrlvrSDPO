@@ -245,6 +245,7 @@ apptainer exec --nv \
     trainer.resume_mode=disable \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
+    trainer.rollout_data_freq=20 \
     trainer.max_actor_ckpt_to_keep=1 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=4294967296 \
