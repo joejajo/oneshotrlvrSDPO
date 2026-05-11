@@ -3,7 +3,7 @@
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:2
 #SBATCH --ntasks=1
-#SBATCH --time=40:00:00
+#SBATCH --time=18:00:00
 #SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_thesis_2gpu/logs/train_%j.out
 #SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_thesis_2gpu/logs/train_%j.err
 
@@ -85,7 +85,7 @@ echo "================================================================"
 #   max_num_seqs=32               → half of 4-GPU version
 #   object_store_memory=2GB       → 2 GPUs, half the 4-GPU budget
 #
-# Timing estimate: ~140s/step × 1000 steps ≈ 38.9h; wall=40h
+# Timing estimate: ~140s/step × 440 steps ≈ 17.1h; wall=18h (partition cap)
 #
 # Memory per GPU (2×A100-40GB):
 #   vLLM: 0.4 × 40GB = 16GB reserved (TP=1, single GPU)
@@ -118,6 +118,7 @@ apptainer exec --nv \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.trust_remote_code=True \
+    actor_rollout_ref.model.dtype=bfloat16 \
     \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=8 \
@@ -184,7 +185,7 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=1000 \
+    trainer.total_training_steps=440 \
     trainer.save_freq=20 \
     trainer.test_freq=20 \
     trainer.val_before_train=True \
