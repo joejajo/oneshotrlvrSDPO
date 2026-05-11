@@ -1,18 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=sdpo_sec3_4g
+#SBATCH --job-name=thesis_sdpo
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:a100:4
 #SBATCH --ntasks=1
 #SBATCH --time=20:00:00
-#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sec3_4gpu/logs/train_%j.out
-#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_sec3_4gpu/logs/train_%j.err
+#SBATCH --output=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_thesis/logs/train_%j.out
+#SBATCH --error=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO/output_thesis/logs/train_%j.err
 
 set -euo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
-OUTPUT_ROOT=${PROJECT_ROOT}/output_sec3_4gpu
+OUTPUT_ROOT=${PROJECT_ROOT}/output_thesis
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
 
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
@@ -109,7 +109,7 @@ export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  SDPO training  [Paper Section 3 — 4×A100, 1000 steps]"
+echo "  SDPO training  [Thesis — Paper §3, 4×A100, 1000 steps]"
 echo "  Job ID      : ${SLURM_JOB_ID}"
 echo "  Model       : ${MODEL_PATH}"
 echo "  Train data  : ${TRAIN_PARQUET}"
@@ -121,26 +121,32 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
-# ── SDPO Paper Section 3 — 4×A100, 1000 steps ────────────────────────────────
+# ── Thesis SDPO — Paper §3 exact hyperparameters, 4×A100, 1000 steps ─────────
 #
-# Same hyperparameters as train_sdpo_sec3.slurm (2-GPU) but with 4 GPUs:
-#   tensor_model_parallel_size=2  → vLLM splits across 2 GPUs (faster generation)
-#   n_gpus_per_node=4             → actor FSDP shards across 4 GPUs (faster training)
-#   max_num_batched_tokens=32768  → 2× for TP=2 (same per-GPU token budget)
+# Identical hyperparameters to train_sdpo_sec3.slurm (2-GPU baseline) plus:
+#   tensor_model_parallel_size=2  → vLLM TP across 2 GPUs; 2 TP-groups with 4 GPUs
+#                                    → 2× rollout throughput vs TP=1 on 2 GPUs
+#   n_gpus_per_node=4             → actor FSDP shards across all 4 GPUs
+#   max_num_batched_tokens=32768  → 2× (32768/GPU budget × 2 TP-GPUs)
+#   max_num_seqs=64               → 2× (TP=2 doubles total KV cache: 2×16GB=32GB)
+#   object_store_memory=4GB       → 2× (more Ray tensors with 4-GPU actor)
 #
-# Timing: 2-GPU ~140s/step → 4-GPU ~70s/step (estimated)
-#   70s/step × 1000 steps ≈ 19.4h; wall time set to 20h.
+# Timing estimate: ~140s/step (2-GPU) → ~70s/step (4-GPU, TP=2)
+#   70s × 1000 steps ≈ 19.4h; wall=20h ✓
 #
 # Memory per GPU (4×A100-40GB):
-#   vLLM (TP=2): 0.4 × 40GB = 16GB shared across 2 GPUs for KV cache
-#   Teacher logits: 7168 tok × 151936 vocab × 4B = 4.05 GB (1 seq/micro-batch)
-#   Actor FSDP (4-way): ~0.75 GB params + ~1.5 GB optimizer states per GPU
+#   vLLM: 0.4 × 40GB = 16GB reserved (TP=2: KV cache sharded across 2 GPUs)
+#   Teacher logits peak: 7168 tok × 151936 × 4B = 4.05 GB (1 seq/micro-batch)
+#   Actor FSDP (4-way shard): ~0.75 GB params + ~1.5 GB Adam states/GPU
 #   Total: ~22 GB/GPU < 40 GB ✓
 #
+# Hyperparameters (Paper §3 exact):
 #   batch=32, temp=1.0, lr=1e-5, norm_adv=True, alpha=0.5 (JSD), topk=100
-#   ppo_mini_batch_size=256 → 256/256 = 1 optimizer step per training step
+#   ppo_mini_batch_size=256 → 256 seqs / 256 = 1 optimizer step per training step
 #   max_reprompt_len=3072 = max_response_length → full sibling solution, no truncation
-#   reprompt_truncation=left → keeps end of solution + re-instruction when truncated
+#   reprompt_truncation=left → preserves end of solution + re-instruction if truncated
+#   include_environment_feedback=false → scalar reward only, no verifier text
+#   entropy_coeff=0 → no entropy regularisation (SDPO paper default)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -165,7 +171,7 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.rollout.max_model_len=8192 \
-    actor_rollout_ref.rollout.max_num_seqs=32 \
+    actor_rollout_ref.rollout.max_num_seqs=64 \
     actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.val_kwargs.temperature=0 \
@@ -228,7 +234,7 @@ apptainer exec --nv \
     trainer.test_freq=1 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
-    trainer.experiment_name=sdpo_sec3_4gpu \
+    trainer.experiment_name=thesis_sdpo \
     trainer.project_name=oneshot_sdpo \
     trainer.default_local_dir="${CKPT_DIR}" \
     trainer.resume_mode=disable \
@@ -236,5 +242,5 @@ apptainer exec --nv \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
     trainer.max_actor_ckpt_to_keep=3 \
     trainer.default_hdfs_dir=null \
-    +ray_kwargs.ray_init.object_store_memory=2147483648 \
+    +ray_kwargs.ray_init.object_store_memory=4294967296 \
     2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
