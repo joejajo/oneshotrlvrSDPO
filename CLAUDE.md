@@ -180,7 +180,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.include_environment_feedback` | `True` | `true` | **Condition D (current)**: rich feedback — sibling solution + verifier text |
 | `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | Include solution in reprompt (condition D) |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
-| `self_distillation.max_reprompt_len` | `10240` | `2048` | Caps reprompt length; truncation_side=left prevents crash |
+| `self_distillation.max_reprompt_len` | `10240` | `3072` (sec3) / `2048` (nofb, rich) | sec3: equals max_response_length → full sibling solution always fits, no truncation. Teacher seq = 1024+3072+3072=7168 tok → 7168×151936×4B=4.05 GB peak logits; safe on 40GB A100. nofb/rich keep 2048 (teacher=6144 tok, 3.48 GB). |
 | `self_distillation.reprompt_truncation` | `"error"` | `left` | **Critical**: default "error" crashes when reprompt > max_reprompt_len; "left" truncates silently |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
 | `self_distillation.distillation_topk` | `100` | `100` (condition A) / `20` (condition D) | Condition A = Section 3 default; condition D = rich_feedback experiment setting |

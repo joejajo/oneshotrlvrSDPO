@@ -130,6 +130,12 @@ echo "================================================================"
 #   ppo_mini_batch_size=256 → 256/256 = 1 optimizer step per training step
 #   (full-batch actor update; paper-default dynamics)
 #
+# Memory: teacher_input = prompt(1024) + reprompt(3072) + response(3072) = 7168 tokens
+#   Peak logit tensor: 7168 × 151936 vocab × 4B = 4.05 GB/GPU (dynamic_bsz → 1 seq/micro-batch)
+#   vLLM reserves 0.4 × 40GB = 16GB; training uses ~12GB → total ~28GB < 40GB ✓
+#   max_reprompt_len=3072 = max_response_length → full sibling solution always fits, no truncation
+#   max_model_len=8192 ≥ 7168 ✓
+#
 # Step budget: ~140s/step × 300 steps ≈ 11.7h; fits in 16h wall time.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -182,7 +188,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=3072 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
