@@ -88,7 +88,7 @@ export APPTAINERENV_UV_THREADPOOL_SIZE=4
 # Suppress known-benign warning from verl's multimodal processor path:
 #   "Unsupported processor type: Qwen2TokenizerFast"
 # This code path is not used for text-only math training.
-export PYTHONWARNINGS="ignore:Unsupported processor type"
+export PYTHONWARNINGS="ignore:Unsupported processor type,ignore:ANTLR runtime and generated code versions disagree"
 
 # Use node-local /tmp for multiprocessing temp files to avoid NFS-related
 # "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
