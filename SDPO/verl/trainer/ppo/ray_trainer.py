@@ -514,6 +514,13 @@ class RayPPOTrainer:
                     batch.batch["teacher_input_ids"].cpu(), skip_special_tokens=True
                 )
 
+            # Per-sample distillation flag — True when this sample was self-distilled
+            # (student failed + its group had a sibling success → teacher rescored its tokens).
+            # Combined with teacher_input, provides direct thesis proof that self-distillation
+            # is occurring in no-rich-feedback training (include_environment_feedback=false).
+            if "self_distillation_mask" in batch.batch:
+                reward_extra_infos_to_dump["distilled"] = batch.batch["self_distillation_mask"].cpu().tolist()
+
             self._dump_generations(
                 inputs=inputs,
                 outputs=outputs,
