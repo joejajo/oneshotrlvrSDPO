@@ -129,26 +129,30 @@ class DataParallelPPOActor(BasePPOActor):
                 f"{self.use_fused_kernels=} or {self.use_prefix_grouper=} for now."
             )
 
-    def _update_teacher(self) -> None:
+    def _update_teacher(self) -> dict:
         self_distillation_cfg = getattr(self.config, "self_distillation", None)
         loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
         if not self_distillation_cfg or loss_mode != "sdpo":
-            return
+            return {}
         teacher_regularization = getattr(self_distillation_cfg, "teacher_regularization", "ema")
         if teacher_regularization != "ema":
-            return
+            return {}
         update_rate = getattr(self_distillation_cfg, "teacher_update_rate", 0.0)
         if update_rate == 0.0:
-            return
+            return {}
         if self.teacher_module is None or self.teacher_module is self.actor_module:
             raise ValueError("EMA teacher requires a separate teacher_module in the actor worker.")
+        sq_norm = 0.0
         with torch.no_grad():
             for teacher_param, student_param in zip(
                 self.teacher_module.parameters(),
                 self.actor_module.parameters(),
             ):
                 student_data = student_param.data.to(device=teacher_param.device)
+                delta = student_data - teacher_param.data
+                sq_norm += delta.pow(2).sum().item()
                 teacher_param.data.mul_(1.0 - update_rate).add_(student_data, alpha=update_rate)
+        return {"self_distillation/teacher_update_norm": sq_norm ** 0.5}
 
     @staticmethod
     def _has_non_empty_multi_modal_inputs(multi_modal_inputs) -> bool:
@@ -917,5 +921,6 @@ class DataParallelPPOActor(BasePPOActor):
                 append_to_dict(metrics, mini_batch_metrics)
         self.actor_optimizer.zero_grad()
         if did_update:
-            self._update_teacher()
+            teacher_metrics = self._update_teacher()
+            metrics.update(teacher_metrics)
         return metrics
