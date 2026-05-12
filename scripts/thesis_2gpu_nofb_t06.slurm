@@ -82,7 +82,7 @@ echo "================================================================"
 #   batch=32, lr=1e-5, norm_adv=True, alpha=0.5 (JSD), topk=100
 #   include_environment_feedback=false → scalar reward only
 #   ppo_mini_batch_size=256 → 1 optimizer step per training step
-#   max_reprompt_len=3072 = max_response_length → full sibling solution, no truncation
+#   max_reprompt_len=2048 → teacher max = 6144 tokens → logsumexp fits in 8.4 GB CUDA free
 #   val_kwargs.temperature=0.6, do_sample=True
 #   440 steps × ~65s/step ≈ 7.9h; wall=18h
 # ─────────────────────────────────────────────────────────────────────────────
@@ -122,7 +122,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=1024 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
@@ -136,7 +136,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=3072 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
