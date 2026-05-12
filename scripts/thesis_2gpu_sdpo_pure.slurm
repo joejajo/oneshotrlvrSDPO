@@ -175,7 +175,7 @@ apptainer exec --nv \
     trainer.total_training_steps=800 \
     trainer.save_freq=20 \
     trainer.test_freq=20 \
-    trainer.val_before_train=False \
+    trainer.val_before_train=True \
     trainer.log_val_generations=0 \
     trainer.experiment_name=thesis_sdpo_pure \
     trainer.project_name=oneshot_sdpo \
