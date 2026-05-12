@@ -98,6 +98,8 @@ echo "================================================================"
 #   include_environment_feedback=false → scalar reward only
 #   ppo_mini_batch_size=256 → 1 optimizer step per training step
 #   ppo_max_token_len_per_gpu=4096 → required (≥ max student seq = 1024+3072)
+#   max_reprompt_len=2048 → ~1780 tok for sibling solution; worst-case 4 short
+#     seqs batched: 4×2048=8192 teacher tokens → 4.6 GB logits → safe
 #   val_kwargs.temperature=0.6, do_sample=True
 #   440 steps × ~92s/step ≈ 11.2h; wall=18h
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,7 +152,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1024 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
