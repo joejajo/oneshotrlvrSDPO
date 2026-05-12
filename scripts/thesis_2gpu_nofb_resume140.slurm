@@ -78,15 +78,16 @@ echo "================================================================"
 # ~8 GB; torch.logsumexp then tried to allocate another ~9 GB intermediate →
 # OOM at step 144 (only 8.42 GB CUDA free due to fragmentation).
 #
-# Fix A: ppo_max_token_len_per_gpu=1024
-#   Prompt alone = 1024 tokens → always exactly 1 student per micro-batch.
-#   Teacher = 1024 + reprompt + response ≤ 6144 tokens (with fix B).
+# Fix A: ppo_max_token_len_per_gpu=4096 (unchanged — must be ≥ max_seq_len=4096)
+#   Hard assert in seqlen_balancing.py requires budget ≥ longest sequence.
 #
-# Fix B: max_reprompt_len=2048 (was 3072)
-#   Teacher max = 1024 + 2048 + 3072 = 6144 tokens.
-#   Logits = 3.5 GB; logsumexp intermediate = 3.5 GB → 7 GB total < 8.42 GB ✓
-#   Mean response at step 140 is ~700 tokens → typical reprompt also ~700,
-#   well under 2048; only the 7-9% of max-length responses are truncated.
+# Fix B: max_reprompt_len=1024 (was 3072)
+#   Root cause: 4 near-zero-response sequences can batch together
+#   (4 × 1024 = 4096 = budget). With max_reprompt_len=3072 their teacher
+#   sequences = 4 × (1024+3072+~0) = 16384 tokens → 9.27 GB logits → OOM.
+#   With max_reprompt_len=1024: 4 × (1024+1024) = 8192 → 4.6 GB → safe ✓
+#   Mean response at step 140 is ~700 tokens so typical reprompt is ~700,
+#   well under 1024. Only very long siblings (>1024 tok) get left-truncated.
 #
 # Fix C: resume_mode=auto  (was disable)
 #   Resumes from global_step_140 checkpoint in the same output dir.
@@ -130,7 +131,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=1024 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
@@ -144,7 +145,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1024 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
