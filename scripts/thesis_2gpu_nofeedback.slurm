@@ -54,7 +54,7 @@ export VLLM_DISABLE_COMPILE_CACHE=1
 export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1
 export APPTAINERENV_UV_THREADPOOL_SIZE=4
-export PYTHONWARNINGS="ignore:Unsupported processor type,ignore:ANTLR runtime and generated code versions disagree"
+export PYTHONWARNINGS="ignore:Unsupported processor type"
 export TMPDIR=/tmp
 export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
@@ -196,8 +196,9 @@ apptainer exec --nv \
     trainer.resume_mode=disable \
     trainer.validation_data_dir="${ROLLOUT_DIR}" \
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}" \
-    trainer.rollout_data_freq=20 \
+    ++trainer.rollout_data_freq=20 \
     trainer.max_actor_ckpt_to_keep=1 \
     trainer.default_hdfs_dir=null \
     +ray_kwargs.ray_init.object_store_memory=2147483648 \
-    2>&1 | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
+    2>&1 | grep -v "ANTLR runtime and generated code versions disagree" \
+    | tee "${OUTPUT_ROOT}/logs/train_${SLURM_JOB_ID}.log"
