@@ -14,52 +14,29 @@ PROJECT_ROOT=/home/woody/iwi7/iwi7107h/oneshotrlvrSDPO
 ONESHOT_DIR=${PROJECT_ROOT}
 OUTPUT_ROOT=${PROJECT_ROOT}/output_nofb
 SIF=/home/woody/iwi7/iwi7107h/images/verl_vllm017_latest.sif
-
 MODEL_PATH=/home/woody/iwi7/iwi7107h/models/Qwen2.5-Math-1.5B
-
-# Parquet files committed directly to the repo (from One-Shot-RLVR)
-# pi1_r128.parquet  : 128 copies of π₁ — the one-shot training set
-# math500.parquet   : MATH-500 — used for both online validation and standalone eval
 TRAIN_PARQUET=${ONESHOT_DIR}/data/pi1_r128.parquet
 EVAL_PARQUET=${ONESHOT_DIR}/data/math500.parquet
-
 REWARD_PATH=${ONESHOT_DIR}/reward/math_reward.py
 CKPT_DIR=${OUTPUT_ROOT}/checkpoints
 ROLLOUT_DIR=${OUTPUT_ROOT}/rollouts
 TRAIN_ROLLOUT_DIR=${OUTPUT_ROOT}/train_rollouts
 
 # ── Environment ───────────────────────────────────────────────────────────────
-# No conda or module load needed — runtime is supplied by the Apptainer container.
-# All env vars set here are inherited by the container (Apptainer does not clean env
-# by default).
-
 export WANDB_MODE=disabled
 export WANDB_DISABLED=true
-
-# TensorBoard: SDPO's _TensorboardAdapter reads TENSORBOARD_DIR at init.
-# Logs land at: $TENSORBOARD_DIR/<project_name>/<experiment_name>/
 export TENSORBOARD_DIR=${OUTPUT_ROOT}/tensorboard
 
-# Make reward module and verl importable inside the container.
 SDPO_DIR=${PROJECT_ROOT}/SDPO
-# pkgs/ holds packages not in the container (latex2sympy2, regex, antlr4).
-# Install once with:
+# One-time pkgs install (login node, not here):
 #   pip install --target=${PROJECT_ROOT}/pkgs latex2sympy2 regex antlr4-python3-runtime==4.9.3
-# antlr4-python3-runtime==4.9.3 must match latex2sympy2's generated code version.
 PKGS_DIR=${PROJECT_ROOT}/pkgs
 export PYTHONPATH="${ONESHOT_DIR}:${SDPO_DIR}:${PKGS_DIR}:${PYTHONPATH:-}"
 
-# Container ships its own CUDA at /usr/local/cuda — use that as fallback.
-# Do NOT call "module load cuda" here; modules are unavailable inside Apptainer.
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 
-# --nv rewrites LD_LIBRARY_PATH but does NOT touch LD_PRELOAD.
-# Force-load container versions of these libraries before --nv's host versions:
-#   libcupti    : host CUPTI missing cuptiActivityEnableDriverApi
-#   libnccl     : host NCCL missing ncclCommShrink (batch nodes have old host NCCL)
-#   libcublas*  : ensure cuBLASLt init uses container's version, not host's
-#                 (host cuBLASLt init fails in vLLM worker when NCCL is also preloaded)
+# Force container CUDA libs; host versions are older (missing symbols for cupti/nccl/cublas)
 _NV="/usr/local/lib/python3.12/dist-packages/nvidia"
 export APPTAINERENV_LD_PRELOAD="\
 ${_NV}/cuda_cupti/lib/libcupti.so.12:\
@@ -67,96 +44,57 @@ ${_NV}/nccl/lib/libnccl.so.2:\
 ${_NV}/cublas/lib/libcublas.so.12:\
 ${_NV}/cublas/lib/libcublasLt.so.12"
 
-# vLLM settings
-# VLLM_USE_V1 is NOT recognized by vLLM 0.17.0 — triggers "Unknown env var" warning.
-# VLLM_DISABLE_COMPILE_CACHE=1 suppresses the torch.compile serialization crash.
+# VLLM_USE_V1 is unrecognised in vLLM 0.17.0; VLLM_DISABLE_COMPILE_CACHE avoids torch.compile crash
 unset VLLM_ATTENTION_BACKEND
 unset ROCR_VISIBLE_DEVICES
 export VLLM_DISABLE_COMPILE_CACHE=1
 export PYTHONUNBUFFERED=1
 
-# Block ~/.local/lib/python3.12/site-packages from being loaded inside the container.
-# The user has an incompatible Triton installed at ~/.local that overrides the container's
-# Triton, causing: triton.compiler.errors.CompilationError (uint32/int32 signedness mismatch)
-# in vLLM's topk_topp_triton kernel during profile_run().
+# Incompatible Triton at ~/.local overrides container's — block it
 export PYTHONNOUSERSITE=1
 
-# Prevent uvloop from calling getenv("UV_THREADPOOL_SIZE") during event loop init.
-# Without this, concurrent AgentLoopWorker actor spawns race in glibc getenv → SIGSEGV.
+# Concurrent AgentLoopWorker spawns race in glibc getenv without this → SIGSEGV
 export APPTAINERENV_UV_THREADPOOL_SIZE=4
 
-# Suppress known-benign warning from verl's multimodal processor path:
-#   "Unsupported processor type: Qwen2TokenizerFast"
-# This code path is not used for text-only math training.
 export PYTHONWARNINGS="ignore:Unsupported processor type"
-
-# Use node-local /tmp for multiprocessing temp files to avoid NFS-related
-# "OSError: [Errno 16] Device or resource busy: pymp-*" cleanup noise.
 export TMPDIR=/tmp
 
-# NOTE: expandable_segments:True was previously set here to fix fragmentation OOM at
-# π₁ saturation (~step 11). Removed because vLLM v1's CuMemAllocator explicitly
-# forbids it: "Expandable segments are not compatible with memory pool"
-# (vllm/device_allocator/cumem.py). OOM fragmentation is now mitigated by
-# ppo_max_token_len_per_gpu=4096 which limits peak logit memory per micro-batch.
-
-# AF_UNIX socket paths are capped at 107 bytes on Linux.
-# Ray appends ~63 chars, so RAY_TMPDIR must be ≤ 44 chars. Use short /tmp path.
+# AF_UNIX socket limit: Ray appends ~63 chars; keep RAY_TMPDIR ≤ 44 chars
 export RAY_TMPDIR=/tmp/r${SLURM_JOB_ID}
 
-# Raise open-file-descriptor limit — Ray + vLLM open many sockets.
 ulimit -n 65536 2>/dev/null || true
-
-# Ray plasma store uses /dev/shm by default.
-# SLURM often caps /dev/shm at 64–512 MB, causing the Raylet to crash.
-# Allow plasma to fall back to /tmp if /dev/shm is too small.
 export RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE=1
 
-mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
+mkdir -p "${OUTPUT_ROOT}/logs" "${CKPT_DIR}" "${ROLLOUT_DIR}" "${TRAIN_ROLLOUT_DIR}" \
+         "${OUTPUT_ROOT}/tensorboard" "${RAY_TMPDIR}"
 
 echo "================================================================"
-echo "  One-Shot-RLVR + SDPO training  [NO RICH FEEDBACK — condition A]"
-echo "  Job ID      : ${SLURM_JOB_ID}"
-echo "  Model       : ${MODEL_PATH}"
-echo "  Train data  : ${TRAIN_PARQUET}"
-echo "  Eval data   : ${EVAL_PARQUET}"
-echo "  Checkpoints : ${CKPT_DIR}"
-echo "  TensorBoard : ${TENSORBOARD_DIR}"
-echo "  Val rollouts: ${ROLLOUT_DIR}"
-echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
-echo "  Container   : ${SIF}"
+echo "  One-Shot-RLVR + SDPO  [condition A — scalar reward, no feedback]"
+echo "  Job        : ${SLURM_JOB_ID}"
+echo "  Model      : ${MODEL_PATH}"
+echo "  Train      : ${TRAIN_PARQUET}"
+echo "  Eval       : ${EVAL_PARQUET}"
+echo "  Output     : ${OUTPUT_ROOT}"
+echo "  Container  : ${SIF}"
 echo "================================================================"
 
-# ── SDPO paper scalar reward — exact hyperparameters ─────────────────────────
+# ── Condition A: scalar-only reward (no rich feedback) ────────────────────────
 #
-# This script reproduces the SDPO paper scalar reward (no rich feedback) setting
-# as specified in experiments/generalization/run_sdpo_all.sh + sdpo.yaml.
+# SDPO paper scalar reward setting (experiments/generalization/run_sdpo_all.sh):
+#   alpha=0.5  (JSD = symmetric KL)
+#   distillation_topk=100
+#   train_batch_size=32, lr=1e-5, lr_warmup_steps=10, ppo_mini_batch_size=32
+#   rollout.temperature=1.0, entropy_coeff=0, norm_adv_by_std_in_grpo=False
+#   include_environment_feedback=false  ← reprompt uses sibling solution only
 #
-# include_environment_feedback=false
+# max_reprompt_len=1024: teacher_input = reprompt(≤1024) + response(≤3072) = ≤4096
+#   = model max_position_embeddings; correct limit is 4096 - 3072, NOT 4096 - 3072 - 256
+#   (the 256-token question is already inside the reprompt template)
 #
-# The environment returns only a scalar reward (1 or 0).  There is no text
-# feedback: no "Your answer X is incorrect", no localized verifier hint.
-# SDPO reprompts failed rollouts using only a *successful sibling rollout* from
-# the same group of 8 as the implicit demonstration, without any verifier text.
-#
-# Key hyperparameters (all matching experiments/generalization/run_sdpo_all.sh):
-#   alpha=0.5             (JSD = symmetric KL; paper scalar reward setting)
-#   teacher_update_rate=0.05  (EMA τ=0.05; sdpo.yaml default)
-#   entropy_coeff=0       (no entropy term; paper default)
-#   lr=1e-5               (paper lr)
-#   lr_warmup_steps=10    (paper generalization script)
-#   ppo_mini_batch_size=32  (sdpo.yaml + generalization script)
-#   train_batch_size=32   (paper)
-#   rollout.temperature=1.0  (paper default)
-#   distillation_topk=100  (paper scalar reward setting)
-#   norm_adv_by_std_in_grpo=False  (sdpo.yaml default)
-#
-# Deliberate deviations from paper (resource constraints):
-#   val_kwargs.n=1   (paper uses 16; 500×16=8000 validation rollouts too expensive on 2 GPUs)
+# Deviation from paper: val_kwargs.n=1 (paper uses 16; 500×16 too slow on 2 GPUs)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Launch ────────────────────────────────────────────────────────────────────
-command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on host"; exit 1; }
+command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found"; exit 1; }
 
 apptainer exec --nv \
     --bind "${PROJECT_ROOT}:${PROJECT_ROOT}" \
