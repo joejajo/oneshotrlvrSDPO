@@ -186,6 +186,7 @@ SHARED_ARGS=(
     trainer.validation_data_dir="${ROLLOUT_DIR}"
     trainer.rollout_data_dir="${TRAIN_ROLLOUT_DIR}"
     trainer.default_hdfs_dir=null
+    +ray_kwargs.ray_init.num_cpus=${SLURM_CPUS_ON_NODE} \
     +ray_kwargs.ray_init.object_store_memory=2147483648
 )
 
