@@ -73,17 +73,31 @@ echo "  Trn rollouts: ${TRAIN_ROLLOUT_DIR}"
 echo "  Container   : ${SIF}"
 echo "================================================================"
 
-# ── Thesis v6 — same as v5 but norm_adv_by_std_in_grpo=True ──────────────────
+# ── Thesis v6 — 128-sample batch, norm_adv=True, NCCL deadlock fix ───────────
 #
-# Ablation: does normalising advantages by std help on single-example training?
+# Changes vs v5:
+#   train_batch_size: 32 → 128   — uses all 128 copies of π₁ per step
+#                                   (matches One-Shot-RLVR original batch size)
+#   norm_adv_by_std_in_grpo: False → True
+#                                   prevents model collapse: with unnormalised
+#                                   advantages, negative gradient on failed
+#                                   rollouts collapses model to 2-token responses
+#                                   by step ~196 → empty distillation batches
+#                                   → NCCL hang (seen at steps 191 and 197)
+#   total_training_steps: 800 → 250
+#                                   4× larger batch → ~300s/step → 250×300=75k s
+#                                   fits comfortably within 24h wall time
 #
-#   v5: norm_adv_by_std_in_grpo=False (sdpo.yaml default — unnormalised)
-#   v6: norm_adv_by_std_in_grpo=True  ← this change only
+# NCCL deadlock fix (core_algos.py):
+#   When self_distillation_mask is all-zero, agg_loss returns a constant 0 with
+#   no autograd path → some ranks skip FSDP reduce_scatter (grad=None) while
+#   other ranks call it → deadlock. Fixed by returning 0*student_log_probs.sum()
+#   which keeps grad=tensor(0.0) on all parameters across all ranks.
 #
-# All other settings identical to v5:
-#   ppo_mini_batch_size=256, lr_warmup_steps=10, weight_decay=0.01, grad_clip=1.0
+# Retained from v5:
+#   ppo_mini_batch_size=256 (128×8/256=4 optimizer steps — acceptable IS drift)
+#   lr_warmup_steps=10, weight_decay=0.01, grad_clip=1.0
 #   entropy_coeff=0, lr=1e-5, max_reprompt_len=2048, max_response_length=3072
-#   800 steps, wall=24h
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Launch ────────────────────────────────────────────────────────────────────
@@ -153,7 +167,7 @@ apptainer exec --nv \
     \
     data.train_files="[${TRAIN_PARQUET}]" \
     data.val_files="[${EVAL_PARQUET}]" \
-    data.train_batch_size=32 \
+    data.train_batch_size=128 \
     data.val_batch_size=64 \
     data.max_prompt_length=1024 \
     data.max_response_length=3072 \
@@ -167,7 +181,7 @@ apptainer exec --nv \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.total_epochs=9999 \
-    trainer.total_training_steps=800 \
+    trainer.total_training_steps=250 \
     trainer.save_freq=20 \
     trainer.test_freq=20 \
     trainer.val_before_train=True \
