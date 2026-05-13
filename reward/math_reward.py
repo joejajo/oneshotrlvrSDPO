@@ -828,6 +828,21 @@ def compute_score(
     # Use first processed ground truth for feedback diagnostics (ratio, unit checks).
     primary_gt = processed_ground_truths[0]
 
+    # Anti-reward-hacking guard (training only): require at least 100 characters
+    # of content before the final \boxed{}. Prevents the model from outputting
+    # bare \boxed{answer} or "garbage text \boxed{answer}" to collect reward
+    # without doing any reasoning. Validation is unaffected.
+    if is_training_source:
+        last_box_idx = solution_str.rfind("\\boxed")
+        if last_box_idx >= 0 and last_box_idx < 100:
+            return {
+                "score": 0.0,
+                "extracted_answer": model_answer,
+                "feedback": _make_feedback(no_boxed=False, model_answer=model_answer,
+                                           data_source=data_source, solution_str=solution_str,
+                                           ground_truth=primary_gt),
+            }
+
     for gt in processed_ground_truths:
         is_correct = (grade_answer_mathd(model_answer, gt)
                       or grade_answer_sympy(model_answer, gt)
