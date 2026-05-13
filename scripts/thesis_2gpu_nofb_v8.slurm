@@ -78,18 +78,18 @@ echo "================================================================"
 # Same as v6 except token lengths are tuned so the teacher forward never
 # runs out-of-distribution on positional embeddings:
 #
-#   max_prompt_length=912
-#   max_reprompt_len=1136
+#   max_prompt_length=712
+#   max_reprompt_len=1336
 #   max_response_length=2048
 #   ─────────────────────────────────────────────────────────────────
-#   teacher forward budget: 912 + 1136 + 2048 = 4096  ← exactly at limit
-#   eval budget:            912 + 2048         = 2960  ← well within limit
+#   teacher forward budget: 712 + 1336 + 2048 = 4096  ← exactly at limit
+#   eval budget:            712 + 2048         = 2760  ← well within limit
 #
 # Qwen2.5-Math-1.5B has max_position_embeddings=4096, rope_scaling=null.
 # v6/v7 used reprompt=2048 + response=3072 → teacher sequences up to 5260
 # tokens, running OOD at positions 4097-5260. v8 eliminates this entirely.
 #
-# π₁ prompt is ~140 tokens (well under 912), so reprompt effectively gets
+# π₁ prompt is ~140 tokens (well under 712), so reprompt effectively gets
 # 4096 - 140 - 2048 = 1908 tokens of usable context in practice.
 #
 # All other settings identical to v6:
@@ -148,7 +148,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1136 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1336 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
@@ -167,7 +167,7 @@ apptainer exec --nv \
     data.val_files="[${EVAL_PARQUET}]" \
     data.train_batch_size=128 \
     data.val_batch_size=64 \
-    data.max_prompt_length=912 \
+    data.max_prompt_length=712 \
     data.max_response_length=2048 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \

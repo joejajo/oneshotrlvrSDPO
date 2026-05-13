@@ -146,7 +146,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1136 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1336 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
@@ -165,7 +165,7 @@ apptainer exec --nv \
     data.val_files="[${EVAL_PARQUET}]" \
     data.train_batch_size=128 \
     data.val_batch_size=64 \
-    data.max_prompt_length=912 \
+    data.max_prompt_length=712 \
     data.max_response_length=2048 \
     data.filter_overlong_prompts=True \
     data.trust_remote_code=True \
