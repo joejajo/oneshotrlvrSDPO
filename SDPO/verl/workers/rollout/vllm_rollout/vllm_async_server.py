@@ -109,7 +109,11 @@ class ExternalZeroMQDistributedExecutor(Executor):
         # Each ZMQ worker is a separate Ray actor with 1 visible GPU handling 1 TP rank.
         # vLLM asserts local_world_size <= visible_device_count; setting it to 1 satisfies
         # that while preserving correct per-GPU KV cache allocation.
-        worker_vllm_config.parallel_config.local_world_size = 1
+        try:
+            worker_vllm_config.parallel_config.local_world_size = 1
+        except AttributeError:
+            # vLLM 0.17.0: local_world_size is a read-only property; skip for TP=1
+            pass
         kwargs = dict(
             vllm_config=worker_vllm_config,
             local_rank=None,
