@@ -75,7 +75,7 @@ echo "================================================================"
 
 # ── Thesis v5 — pure SDPO settings, ppo_mini_batch_size=256 ──────────────────
 #
-# Same as v4 with one fix:
+# Same as v4 with fixes:
 #   ppo_mini_batch_size: 32 → 256
 #
 #   32 caused 8 optimizer steps/training-step → IS drift → model collapse
@@ -85,6 +85,11 @@ echo "================================================================"
 #   256 = 1 optimizer step/training-step (256 seqs / 256 = 1).
 #   Memory unchanged: use_dynamic_bsz=True bounds GPU usage by
 #   ppo_max_token_len_per_gpu=4096 regardless of mini-batch size.
+#
+# v5 additions over v4:
+#   lr_warmup_steps=10   → linear LR ramp over first 10 steps
+#   weight_decay=0.01    → explicit (matches actor.yaml default)
+#   grad_clip=1.0        → explicit (matches dp_actor.yaml default)
 #
 # All other settings from sdpo.yaml:
 #   norm_adv_by_std_in_grpo=False, entropy_coeff=0, lr=1e-5
@@ -124,7 +129,9 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.agent.num_workers=1 \
     \
     actor_rollout_ref.actor.optim.lr=1e-5 \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
+    actor_rollout_ref.actor.optim.weight_decay=0.01 \
+    actor_rollout_ref.actor.grad_clip=1.0 \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
