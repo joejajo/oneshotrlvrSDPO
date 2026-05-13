@@ -1103,6 +1103,21 @@ def compute_self_distillation_loss(
     if self_distillation_mask is not None:
         loss_mask = loss_mask * self_distillation_mask.unsqueeze(1)
 
+    # When mask is all-zero, agg_loss returns a detached 0 that has no gradient path
+    # through the student parameters. On FSDP, this causes some ranks to skip
+    # reduce_scatter while other ranks call it → NCCL deadlock.
+    # Fix: return a dummy loss connected to student_log_probs so every parameter
+    # always has grad=tensor(0.0) rather than grad=None, keeping reduce_scatter symmetric.
+    if loss_mask.sum() == 0:
+        dummy_loss = 0.0 * student_log_probs.sum()
+        metrics["self_distillation/distillation_loss"] = 0.0
+        metrics["self_distillation/forward_kl"] = 0.0
+        metrics["self_distillation/reverse_kl"] = 0.0
+        metrics["self_distillation/jsd"] = 0.0
+        metrics["self_distillation/student_entropy"] = 0.0
+        metrics["self_distillation/teacher_entropy"] = 0.0
+        return dummy_loss, metrics
+
     if self_distillation_config.full_logit_distillation:
         use_topk = self_distillation_config.distillation_topk is not None
         if use_topk:
