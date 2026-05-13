@@ -146,9 +146,6 @@ trainer:
   # Directory for logging rollout data; no dump if null
   rollout_data_dir: null
 
-  # Log training rollouts every N steps (1 = every step)
-  rollout_data_freq: 1
-
   # Directory for logging validation data; no dump if null
   validation_data_dir: null
 

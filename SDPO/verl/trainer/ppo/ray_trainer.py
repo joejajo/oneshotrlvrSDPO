@@ -507,19 +507,6 @@ class RayPPOTrainer:
                     "request_id",
                     batch.non_tensor_batch["request_id"].tolist(),
                 )
-            # Decode teacher reprompt context for SDPO — saved as "teacher_input" in JSONL.
-            # teacher_input_ids = original_prompt + reprompt(sibling solution) + student_response.
-            if "teacher_input_ids" in batch.batch:
-                reward_extra_infos_to_dump["teacher_input"] = self.tokenizer.batch_decode(
-                    batch.batch["teacher_input_ids"].cpu(), skip_special_tokens=True
-                )
-
-            # Per-sample distillation flag — True when this sample was self-distilled
-            # (student failed + its group had a sibling success → teacher rescored its tokens).
-            # Combined with teacher_input, provides direct thesis proof that self-distillation
-            # is occurring in no-rich-feedback training (include_environment_feedback=false).
-            if "self_distillation_mask" in batch.batch:
-                reward_extra_infos_to_dump["distilled"] = batch.batch["self_distillation_mask"].cpu().tolist()
 
             self._dump_generations(
                 inputs=inputs,
@@ -1860,10 +1847,9 @@ class RayPPOTrainer:
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
 
-                    # Log rollout generations if enabled, at rollout_data_freq interval
+                    # Log rollout generations if enabled
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
-                    rollout_data_freq = self.config.trainer.get("rollout_data_freq", 1)
-                    if rollout_data_dir and self.global_steps % rollout_data_freq == 0:
+                    if rollout_data_dir:
                         self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir)
 
                 # validate

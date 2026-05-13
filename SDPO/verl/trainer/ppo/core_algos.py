@@ -1103,21 +1103,6 @@ def compute_self_distillation_loss(
     if self_distillation_mask is not None:
         loss_mask = loss_mask * self_distillation_mask.unsqueeze(1)
 
-    # When mask is all-zero, agg_loss returns a detached 0 that has no gradient path
-    # through the student parameters. On FSDP, this causes some ranks to skip
-    # reduce_scatter while other ranks call it → NCCL deadlock.
-    # Fix: return a dummy loss connected to student_log_probs so every parameter
-    # always has grad=tensor(0.0) rather than grad=None, keeping reduce_scatter symmetric.
-    if loss_mask.sum() == 0:
-        dummy_loss = 0.0 * student_log_probs.sum()
-        metrics["self_distillation/distillation_loss"] = 0.0
-        metrics["self_distillation/forward_kl"] = 0.0
-        metrics["self_distillation/reverse_kl"] = 0.0
-        metrics["self_distillation/jsd"] = 0.0
-        metrics["self_distillation/student_entropy"] = 0.0
-        metrics["self_distillation/teacher_entropy"] = 0.0
-        return dummy_loss, metrics
-
     if self_distillation_config.full_logit_distillation:
         use_topk = self_distillation_config.distillation_topk is not None
         if use_topk:
@@ -1200,37 +1185,6 @@ def compute_self_distillation_loss(
         loss_agg_mode=loss_agg_mode,
         batch_num_tokens=loss_mask.sum().clamp(min=1.0),
     )
-
-    # Populate metrics for thesis/monitoring
-    n_tokens = loss_mask.sum().clamp(min=1.0)
-    metrics["self_distillation/distillation_loss"] = loss.detach().item()
-
-    if self_distillation_config.full_logit_distillation:
-        alpha_val = self_distillation_config.alpha
-        if alpha_val == 0.0:
-            # pure forward KL (student→teacher)
-            fkl = (kl_loss.sum(-1) * loss_mask).sum() / n_tokens
-            metrics["self_distillation/forward_kl"] = fkl.detach().item()
-        elif alpha_val == 1.0:
-            # pure reverse KL (teacher→student)
-            rkl = (kl_loss.sum(-1) * loss_mask).sum() / n_tokens
-            metrics["self_distillation/reverse_kl"] = rkl.detach().item()
-        else:
-            # JSD: kl_loss = lerp(kl_student, kl_teacher, alpha) per-token
-            fkl = (kl_student.sum(-1) * loss_mask).sum() / n_tokens
-            rkl = (kl_teacher.sum(-1) * loss_mask).sum() / n_tokens
-            metrics["self_distillation/forward_kl"] = fkl.detach().item()
-            metrics["self_distillation/reverse_kl"] = rkl.detach().item()
-            metrics["self_distillation/jsd"] = loss.detach().item()
-
-        # Student and teacher entropy from top-k log probs (lower bound approximation)
-        if student_distill_log_probs is not None and teacher_distill_log_probs is not None:
-            # H = -sum_k p_k log p_k over response tokens, masked mean
-            s_ent = -(student_distill_log_probs.exp() * student_distill_log_probs).sum(-1)
-            t_ent = -(teacher_distill_log_probs.exp() * teacher_distill_log_probs).sum(-1)
-            metrics["self_distillation/student_entropy"] = (s_ent * loss_mask).sum().detach().item() / n_tokens.item()
-            metrics["self_distillation/teacher_entropy"] = (t_ent * loss_mask).sum().detach().item() / n_tokens.item()
-
     return loss, metrics
 
 
