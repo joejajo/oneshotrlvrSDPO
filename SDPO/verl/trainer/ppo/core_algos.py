@@ -1179,6 +1179,10 @@ def compute_self_distillation_loss(
     if rollout_is_weights is not None:
         per_token_loss = per_token_loss * rollout_is_weights
 
+    # 2-GPU FSDP guard: empty distillation batch → keep autograd path alive on all ranks.
+    if loss_mask.sum() == 0:
+        return 0.0 * student_log_probs.sum(), metrics
+
     loss = agg_loss(
         loss_mat=per_token_loss,
         loss_mask=loss_mask,
