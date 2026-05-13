@@ -182,8 +182,8 @@ apptainer exec --nv \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.max_model_len=8192 \
-    actor_rollout_ref.rollout.max_num_seqs=32 \
+    actor_rollout_ref.rollout.max_model_len=4096 \
+    actor_rollout_ref.rollout.max_num_seqs=128 \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.val_kwargs.temperature=0 \
@@ -210,7 +210,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
     actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
-    actor_rollout_ref.actor.self_distillation.max_reprompt_len=4096 \
+    actor_rollout_ref.actor.self_distillation.max_reprompt_len=1024 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
     actor_rollout_ref.actor.self_distillation.distillation_topk=100 \
     actor_rollout_ref.actor.self_distillation.distillation_add_tail=true \
@@ -243,7 +243,7 @@ apptainer exec --nv \
     trainer.total_epochs=9999 \
     trainer.total_training_steps=300 \
     trainer.save_freq=10 \
-    trainer.test_freq=1 \
+    trainer.test_freq=20 \
     trainer.val_before_train=True \
     trainer.log_val_generations=0 \
     trainer.experiment_name=oneshot_sdpo_qwen25math_1.5b_pi1_sec3 \

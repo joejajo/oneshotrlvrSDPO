@@ -180,7 +180,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `self_distillation.include_environment_feedback` | `True` | `true` | **Condition D (current)**: rich feedback — sibling solution + verifier text |
 | `self_distillation.environment_feedback_only_without_solution` | `False` | `false` | Include solution in reprompt (condition D) |
 | `self_distillation.remove_thinking_from_demonstration` | `True` | `false` | Qwen2.5-Math-1.5B has no `<think>` tags |
-| `self_distillation.max_reprompt_len` | `10240` | `4096` | Caps reprompt length; truncation_side=left prevents crash |
+| `self_distillation.max_reprompt_len` | `10240` | `1024` (all conditions) | max_model_len(4096) − max_response_length(3072) = 1024; teacher input = reprompt + response ≤ 4096 = model's max_position_embeddings |
 | `self_distillation.reprompt_truncation` | `"error"` | `left` | **Critical**: default "error" crashes when reprompt > max_reprompt_len; "left" truncates silently |
 | `self_distillation.full_logit_distillation` | `True` | `true` | Same as default |
 | `self_distillation.distillation_topk` | `100` | `100` (conditions A and §3) / `20` (condition D) | Conditions A/§3 = paper scalar reward default; condition D = rich_feedback experiment setting |
@@ -192,7 +192,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | `use_kl_loss` | `false` | not overridden | No KL penalty; SDPO uses JSD |
 | `entropy_coeff` | `0` | not overridden | SDPO default (0); no entropy term |
 | `ppo_mini_batch_size` | `256` | `32` (conditions A and §3) | Matches sdpo.yaml + generalization script; `ppo_max_token_len_per_gpu=4096` keeps peak logit memory safe |
-| `ppo_max_token_len_per_gpu` | — | `4096` | Teacher sequences = prompt(1024)+reprompt(4096)+response(3072) = 8192 tokens; at 4096 budget at most 1 student seq per micro-batch → teacher logsumexp = 8192×151936×4 = 4.97 GB; fits on 2×A100-40GB with vLLM reserved |
+| `ppo_max_token_len_per_gpu` | — | `4096` | Teacher input ≤ reprompt(1024)+response(3072) = 4096; dynamic batching fits 1 teacher seq per micro-batch → teacher logsumexp = 4096×151936×4 ≈ 2.5 GB; fits on 2×A100-40GB with vLLM reserved |
 | `optim.lr` | `1e-6` | `1e-5` (conditions A and §3) | Paper generalization script lr; matches sdpo.yaml |
 | `optim.lr_warmup_steps` | `-1` | `10` (conditions A and §3) | Paper generalization script warmup |
 
@@ -201,7 +201,7 @@ The `compute_self_distillation_loss` in `verl/trainer/ppo/core_algos.py` impleme
 | Key | SDPO default | Our override | Reason |
 |---|---|---|---|
 | `calculate_log_probs` | `False` | `True` | **Required** for SDPO IS correction |
-| `max_model_len` | `null` | `8192` | prompt(1024)+response(3072)+reprompt(4096) |
+| `max_model_len` | `null` | `4096` | Qwen2.5-Math-1.5B max_position_embeddings=4096; vLLM caps higher values silently |
 | `max_num_batched_tokens` | `8192` | `16384` | 2× for concurrent sequences |
 | `n` | `1` | `8` | 8 rollouts per prompt |
 | `val_kwargs.n` | `1` | `1` | Greedy pass@1 (n=16 too expensive on 500 problems) |
