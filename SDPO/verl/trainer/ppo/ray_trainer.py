@@ -1866,9 +1866,13 @@ class RayPPOTrainer:
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
 
-                    # Log rollout generations if enabled
+                    # Log rollout generations if enabled — only at checkpoint steps to limit disk usage
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
-                    if rollout_data_dir:
+                    save_freq = self.config.trainer.save_freq
+                    at_checkpoint_step = save_freq > 0 and (
+                        is_last_step or self.global_steps % save_freq == 0
+                    )
+                    if rollout_data_dir and at_checkpoint_step:
                         self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir)
 
                 # validate
