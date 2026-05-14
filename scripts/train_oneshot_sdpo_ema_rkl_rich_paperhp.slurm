@@ -85,7 +85,7 @@ echo "================================================================"
 #
 #   lr=1e-6                — paper rich feedback value (vs 1e-5 in ema_rkl_rich_wide)
 #   lr_warmup_steps=0      — paper rich feedback value (vs 10 in ema_rkl_rich_wide)
-#   ppo_mini_batch_size=1  — paper rich feedback value (vs 32 in ema_rkl_rich_wide)
+#   ppo_mini_batch_size=16 — compromise: 2 gradient updates/step (paper=1, old=32)
 #   teacher_update_rate=0.01 — paper rich feedback value (vs 0.05 in ema_rkl_rich_wide)
 #
 # Only deliberate deviation from the paper's rich feedback script:
@@ -99,10 +99,11 @@ echo "================================================================"
 #   include_environment_feedback=true
 #   environment_feedback_only_without_solution=false
 #
-# ppo_mini_batch_size=1: each gradient update uses a single teacher sequence.
-# With train_batch_size=32, this gives 32 gradient updates per step.
-# use_dynamic_bsz=True + ppo_max_token_len_per_gpu=4096 ensures one teacher
-# sequence per micro-batch (teacher input ≤ 4096 tokens).
+# ppo_mini_batch_size=16: each gradient update uses 16 sequences.
+# With train_batch_size=32, this gives 2 gradient updates per step.
+# Compromise between paper (mini_batch=1, 32 updates/step) and ema_rkl_rich_wide
+# (mini_batch=32, 1 update/step). More online than 32, faster than 1.
+# use_dynamic_bsz=True + ppo_max_token_len_per_gpu=4096 caps peak logit memory.
 # ─────────────────────────────────────────────────────────────────────────────
 
 command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found"; exit 1; }
@@ -138,7 +139,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
     actor_rollout_ref.actor.entropy_coeff=0 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=1 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=16 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=4096 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
