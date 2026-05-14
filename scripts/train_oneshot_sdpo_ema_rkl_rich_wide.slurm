@@ -100,7 +100,7 @@ echo "================================================================"
 #    were needed only for edge cases. Watch clip_ratio in TensorBoard — if it
 #    stays near zero the cap is fine.
 #
-# 2. Slower EMA (teacher_update_rate=0.01, was 0.05):
+# 2. Slower EMA (teacher_update_rate=0.05, was 0.01):
 #    Paper's own rich feedback experiment uses τ=0.01. With rich feedback the
 #    reprompt already provides a strong learning signal — teacher does not need
 #    to track student as fast. Slower EMA → more stable target distribution →
@@ -111,7 +111,7 @@ echo "================================================================"
 #   alpha=1.0 (reverse KL, mode-seeking)
 #   distillation_topk=20   (paper rich feedback value)
 #   norm_adv_by_std_in_grpo=False  (sdpo.yaml default; unnormalized advantages)
-#   teacher_update_rate=0.01
+#   teacher_update_rate=0.05
 #   max_reprompt_len=2048, max_response_length=2048
 #   lr=1e-5, warmup=10, batch=32, mini_batch=32, temp=1.0
 #   include_environment_feedback=true, environment_feedback_only_without_solution=false
@@ -172,7 +172,7 @@ apptainer exec --nv \
     actor_rollout_ref.actor.self_distillation.full_logit_distillation=true \
     actor_rollout_ref.actor.self_distillation.alpha=1.0 \
     actor_rollout_ref.actor.self_distillation.teacher_regularization=ema \
-    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.01 \
+    actor_rollout_ref.actor.self_distillation.teacher_update_rate=0.05 \
     actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration=false \
     actor_rollout_ref.actor.self_distillation.max_reprompt_len=2048 \
     actor_rollout_ref.actor.self_distillation.reprompt_truncation=left \
