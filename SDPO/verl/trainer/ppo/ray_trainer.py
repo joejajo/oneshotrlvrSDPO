@@ -786,6 +786,12 @@ class RayPPOTrainer:
         max_reprompt_len = self_distillation_cfg.max_reprompt_len
         teacher_prompt_truncated_fraction = (prompt_lens >= max_reprompt_len).float().mean().item()
 
+        # Per-sample reprompt diagnostics → written to train rollout JSONL
+        if reward_extra_infos_dict is not None:
+            reward_extra_infos_dict["reprompt_len"] = [int(l) for l in prompt_lens.tolist()]
+            reward_extra_infos_dict["feedback_used"] = [bool(f) for f in feedback_used]
+            reward_extra_infos_dict["has_solution"] = [s is not None for s in solution_strs]
+
         uids = set(batch.non_tensor_batch["uid"])
         num_with_feedback_available = sum(1 for f in feedback_list if f is not None)
         num_with_feedback_used = sum(1 for f in feedback_used if f)
